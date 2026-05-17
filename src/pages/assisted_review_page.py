@@ -93,7 +93,6 @@ class AssistedReviewPage(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        title = QLabel("Model Suggestions")
         image_list_title = QLabel("Image List")
         image_list_title.setObjectName("panelTitle")
         layout.addWidget(image_list_title)
@@ -152,11 +151,9 @@ class AssistedReviewPage(QWidget):
         if 0 <= current_index < self.image_list.count():
             self.image_list.setCurrentRow(current_index)
 
-        has_multiple = self.image_list.count() > 1
         has_any = self.image_list.count() > 0
-        self.previous_button.setEnabled(has_multiple)
-        self.next_button.setEnabled(has_multiple)
         self.image_list.setEnabled(has_any)
+        self.update_navigation_state(current_index)
         self._updating_image_list = False
 
     def set_current_image_index(self, index: int) -> None:
@@ -165,7 +162,13 @@ class AssistedReviewPage(QWidget):
 
         self._updating_image_list = True
         self.image_list.setCurrentRow(index)
+        self.update_navigation_state(index)
         self._updating_image_list = False
+
+    def update_navigation_state(self, current_index: int) -> None:
+        total = self.image_list.count()
+        self.previous_button.setEnabled(total > 1 and current_index > 0)
+        self.next_button.setEnabled(total > 1 and 0 <= current_index < total - 1)
 
     def _handle_image_row_changed(self, row: int) -> None:
         if self._updating_image_list or row < 0:
