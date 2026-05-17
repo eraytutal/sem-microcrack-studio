@@ -1,0 +1,36 @@
+{
+  "image": {
+    "filename": "11.tif",
+    "path": "C:/Users/User/Desktop/bitirme-veri/datasets/images/test/11.tif",
+    "width": 1024,
+    "height": 1005
+  },
+  "metadata": {
+    "material": "",
+    "magnification": "",
+    "scale_value": null,
+    "scale_unit": "um",
+    "scale_bar_px": null,
+    "sem_mode": "",
+    "image_quality": "",
+    "notes": ""
+  },
+  "annotations": [
+    {
+      "id": "ann_001",
+      "label": "crack",
+      "shape_type": "rectangle",
+      "bbox": [
+        323.4012219959267,
+        307.0264765784114,
+        429.8370672097759,
+        307.0264765784114
+      ],
+      "source": "manual",
+      "confidence": null,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
+    }
+  ]
+}

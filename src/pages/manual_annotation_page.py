@@ -24,6 +24,7 @@ from src.widgets.image_viewer import ImageViewer
 class ManualAnnotationPage(QWidget):
     previous_image_requested = Signal()
     next_image_requested = Signal()
+    save_annotation_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -110,39 +111,40 @@ class ManualAnnotationPage(QWidget):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        label_combo = QComboBox()
-        label_combo.setObjectName("propertyField")
-        label_combo.addItems(["crack", "scratch", "pit", "void", "uncertain", "no_defect"])
-        source_combo = QComboBox()
-        source_combo.setObjectName("propertyField")
-        source_combo.addItems(["manual", "model"])
-        confidence = QDoubleSpinBox()
-        confidence.setObjectName("propertyField")
-        confidence.setLocale(QLocale(QLocale.English, QLocale.UnitedStates))
-        confidence.setRange(0.0, 1.0)
-        confidence.setSingleStep(0.05)
-        confidence.setValue(1.0)
-        confidence.setDecimals(2)
-        exportable = QCheckBox("Exportable to mask")
-        exportable.setChecked(True)
-        notes = QTextEdit()
-        notes.setPlaceholderText("Notes")
-        notes.setFixedHeight(120)
+        self.label_combo = QComboBox()
+        self.label_combo.setObjectName("propertyField")
+        self.label_combo.addItems(["crack", "scratch", "pit", "void", "uncertain", "no_defect"])
+        self.source_combo = QComboBox()
+        self.source_combo.setObjectName("propertyField")
+        self.source_combo.addItems(["manual", "model"])
+        self.confidence_spin = QDoubleSpinBox()
+        self.confidence_spin.setObjectName("propertyField")
+        self.confidence_spin.setLocale(QLocale(QLocale.English, QLocale.UnitedStates))
+        self.confidence_spin.setRange(0.0, 1.0)
+        self.confidence_spin.setSingleStep(0.05)
+        self.confidence_spin.setValue(1.0)
+        self.confidence_spin.setDecimals(2)
+        self.exportable_checkbox = QCheckBox("Exportable to mask")
+        self.exportable_checkbox.setChecked(True)
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setPlaceholderText("Notes")
+        self.notes_edit.setFixedHeight(120)
 
-        form.addRow("Label", label_combo)
-        form.addRow("Source", source_combo)
-        form.addRow("Confidence", confidence)
-        form.addRow("", exportable)
-        form.addRow("Notes", notes)
+        form.addRow("Label", self.label_combo)
+        form.addRow("Source", self.source_combo)
+        form.addRow("Confidence", self.confidence_spin)
+        form.addRow("", self.exportable_checkbox)
+        form.addRow("Notes", self.notes_edit)
         layout.addLayout(form)
         layout.addStretch(1)
 
-        save = QPushButton("Save Annotation")
-        save.setIcon(icon("save", active=True))
+        self.save_annotation_button = QPushButton("Save Annotation")
+        self.save_annotation_button.setIcon(icon("save", active=True))
+        self.save_annotation_button.clicked.connect(self.save_annotation_requested.emit)
         self.clear_selection_button = QPushButton("Clear Selection")
         self.clear_selection_button.setIcon(icon("delete"))
         self.clear_selection_button.clicked.connect(self.clear_selection)
-        layout.addWidget(save)
+        layout.addWidget(self.save_annotation_button)
         layout.addWidget(self.clear_selection_button)
         self.set_tool_mode("select")
         return panel
@@ -170,3 +172,11 @@ class ManualAnnotationPage(QWidget):
         can_go_next: bool,
     ) -> None:
         self.navigation_bar.set_state(filename, current_index, total_count, can_go_previous, can_go_next)
+
+    def annotation_save_context(self) -> dict[str, object]:
+        return {
+            "label": self.label_combo.currentText(),
+            "exportable_to_mask": self.exportable_checkbox.isChecked(),
+            "annotation_notes": self.notes_edit.toPlainText(),
+            "notes": self.notes_edit.toPlainText(),
+        }

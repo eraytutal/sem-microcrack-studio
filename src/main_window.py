@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.annotation_io import load_annotation_json, save_annotation_json
 from src.icons import icon
 from src.pages.assisted_review_page import AssistedReviewPage
 from src.pages.dataset_export_page import DatasetExportPage
@@ -145,6 +146,7 @@ class MainWindow(QMainWindow):
         self.assisted_review_page.next_image_requested.connect(self.load_next_image)
         self.manual_annotation_page.previous_image_requested.connect(self.load_previous_image)
         self.manual_annotation_page.next_image_requested.connect(self.load_next_image)
+        self.manual_annotation_page.save_annotation_requested.connect(self.save_current_annotation_json)
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
         self.stack.addWidget(self.dataset_export_page)
@@ -248,6 +250,21 @@ class MainWindow(QMainWindow):
         for page in (self.assisted_review_page, self.manual_annotation_page):
             page.set_navigation_state(filename, display_index, total_count, can_go_previous, can_go_next)
 
+    def save_current_annotation_json(self) -> None:
+        if not self.current_image_path or not self.current_image_size:
+            QMessageBox.warning(self, "No Image Loaded", "Open an image before saving annotations.")
+            return
+
+        rects = self.manual_annotation_page.image_viewer.get_rect_annotations()
+        self.manual_annotations_by_image[self.current_image_path] = rects
+        annotation_path = save_annotation_json(
+            self.current_image_path,
+            self.current_image_size,
+            rects,
+            self.manual_annotation_page.annotation_save_context(),
+        )
+        self.statusBar().showMessage(f"Saved annotations to {annotation_path}", 4000)
+
     def switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
         page_name, subtitle = self.page_meta[index]
@@ -300,5 +317,36 @@ class MainWindow(QMainWindow):
         )
 
     def _restore_manual_annotations(self, image_path: str) -> None:
-        rects = self.manual_annotations_by_image.get(image_path, [])
+        if image_path in self.manual_annotations_by_image:
+            rects = self.manual_annotations_by_image[image_path]
+        else:
+            rects = self._load_rect_annotations_from_json(image_path)
+            self.manual_annotations_by_image[image_path] = rects
+
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
+
+    def _load_rect_annotations_from_json(self, image_path: str) -> list[dict[str, float]]:
+        data = load_annotation_json(image_path)
+        if not data:
+            return []
+
+        rects: list[dict[str, float]] = []
+        for annotation in data.get("annotations", []):
+            if annotation.get("shape_type") != "rectangle":
+                continue
+
+            bbox = annotation.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+
+            x, y, width, height = bbox
+            rects.append(
+                {
+                    "x": float(x),
+                    "y": float(y),
+                    "width": float(width),
+                    "height": float(height),
+                }
+            )
+
+        return rects

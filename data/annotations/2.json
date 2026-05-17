@@ -1,0 +1,19 @@
+{
+  "image": {
+    "filename": "2.tif",
+    "path": "C:/Users/User/Desktop/bitirme-veri/datasets/images/test/2.tif",
+    "width": 1024,
+    "height": 1005
+  },
+  "metadata": {
+    "material": "",
+    "magnification": "",
+    "scale_value": null,
+    "scale_unit": "um",
+    "scale_bar_px": null,
+    "sem_mode": "",
+    "image_quality": "",
+    "notes": ""
+  },
+  "annotations": []
+}
