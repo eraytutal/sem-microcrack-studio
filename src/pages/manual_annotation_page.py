@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.icons import icon
+from src.widgets.image_viewer import ImageViewer
 
 
 class ManualAnnotationPage(QWidget):
@@ -66,15 +67,8 @@ class ManualAnnotationPage(QWidget):
         return row
 
     def _build_viewer(self) -> QWidget:
-        viewer = QFrame()
-        viewer.setObjectName("imageViewer")
-        layout = QVBoxLayout(viewer)
-        layout.setContentsMargins(14, 14, 14, 14)
-        label = QLabel("Manual annotation canvas")
-        label.setObjectName("viewerPlaceholder")
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label, 1)
-        return viewer
+        self.image_viewer = ImageViewer("Manual annotation canvas")
+        return self.image_viewer
 
     def _build_properties_panel(self) -> QWidget:
         panel = QFrame()

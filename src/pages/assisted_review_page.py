@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -12,9 +12,12 @@ from PySide6.QtWidgets import (
 )
 
 from src.icons import icon
+from src.widgets.image_viewer import ImageViewer
 
 
 class AssistedReviewPage(QWidget):
+    open_image_requested = Signal()
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -46,6 +49,8 @@ class AssistedReviewPage(QWidget):
         for text, icon_name in actions:
             button = QPushButton(text)
             button.setIcon(icon(icon_name))
+            if text == "Open Image":
+                button.clicked.connect(self.open_image_requested.emit)
             layout.addWidget(button)
 
         layout.addStretch(1)
@@ -67,15 +72,8 @@ class AssistedReviewPage(QWidget):
         return row
 
     def _build_viewer(self) -> QWidget:
-        viewer = QFrame()
-        viewer.setObjectName("imageViewer")
-        layout = QVBoxLayout(viewer)
-        layout.setContentsMargins(14, 14, 14, 14)
-        label = QLabel("Load an SEM image to start assisted review")
-        label.setObjectName("viewerPlaceholder")
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label, 1)
-        return viewer
+        self.image_viewer = ImageViewer("Load an SEM image to start assisted review")
+        return self.image_viewer
 
     def _build_suggestions_panel(self) -> QWidget:
         panel = QFrame()
