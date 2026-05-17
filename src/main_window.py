@@ -140,9 +140,10 @@ class MainWindow(QMainWindow):
         self.dataset_export_page = DatasetExportPage()
         self.assisted_review_page.open_image_requested.connect(self.open_image)
         self.assisted_review_page.open_folder_requested.connect(self.open_image_folder)
-        self.assisted_review_page.image_index_selected.connect(self.load_image_at_index)
         self.assisted_review_page.previous_image_requested.connect(self.load_previous_image)
         self.assisted_review_page.next_image_requested.connect(self.load_next_image)
+        self.manual_annotation_page.previous_image_requested.connect(self.load_previous_image)
+        self.manual_annotation_page.next_image_requested.connect(self.load_next_image)
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
         self.stack.addWidget(self.dataset_export_page)
@@ -174,7 +175,6 @@ class MainWindow(QMainWindow):
         self.current_folder_path = str(Path(image_path).parent)
         self.image_paths = [image_path]
         self.current_image_index = 0
-        self.assisted_review_page.set_image_list(self.image_paths, self.current_image_index)
         self.load_image(image_path)
 
     def open_image_folder(self) -> None:
@@ -194,7 +194,6 @@ class MainWindow(QMainWindow):
         self.current_folder_path = folder_path
         self.image_paths = image_paths
         self.current_image_index = 0
-        self.assisted_review_page.set_image_list(self.image_paths, self.current_image_index)
         self.load_image_at_index(self.current_image_index)
 
     def open_folder(self) -> None:
@@ -212,7 +211,6 @@ class MainWindow(QMainWindow):
         self.current_image_size = (image_size.width(), image_size.height())
         if image_path in self.image_paths:
             self.current_image_index = self.image_paths.index(image_path)
-            self.assisted_review_page.set_current_image_index(self.current_image_index)
         self.update_navigation_state()
         self._update_status_bar()
 
@@ -238,7 +236,14 @@ class MainWindow(QMainWindow):
         self.load_image_at_index(next_index)
 
     def update_navigation_state(self) -> None:
-        self.assisted_review_page.update_navigation_state(self.current_image_index)
+        filename = Path(self.current_image_path).name if self.current_image_path else "No image loaded"
+        total_count = len(self.image_paths)
+        display_index = self.current_image_index + 1 if total_count and self.current_image_index >= 0 else 0
+        can_go_previous = total_count > 1 and self.current_image_index > 0
+        can_go_next = total_count > 1 and 0 <= self.current_image_index < total_count - 1
+
+        for page in (self.assisted_review_page, self.manual_annotation_page):
+            page.set_navigation_state(filename, display_index, total_count, can_go_previous, can_go_next)
 
     def switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)

@@ -93,6 +93,31 @@ QGraphicsView#imageViewer {
     border-radius: 10px;
 }
 
+QFrame#imageNavigationBar {
+    background: transparent;
+    border: 0;
+}
+
+QWidget#imageNavigationControls {
+    background: #0d141d;
+    border: 1px solid #26384a;
+    border-radius: 8px;
+}
+
+QPushButton#imageNavigationButton {
+    min-width: 96px;
+    max-width: 120px;
+    padding: 5px 10px;
+}
+
+QLabel#imageNavigationLabel {
+    color: #cbd7e6;
+    font-weight: 700;
+    min-width: 220px;
+    max-width: 300px;
+    qproperty-alignment: AlignCenter;
+}
+
 QLabel#viewerPlaceholder {
     color: #6f7f92;
     font-size: 15pt;
