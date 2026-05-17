@@ -165,13 +165,35 @@ QLabel#summaryLabel {
 
 QComboBox,
 QDoubleSpinBox,
-QTextEdit {
+QTextEdit,
+QListWidget {
     background: #0b121a;
     border: 1px solid #2a4056;
     border-radius: 7px;
     color: #dbe7f3;
     padding: 6px 8px;
     selection-background-color: #155e75;
+}
+
+QListWidget#imageList {
+    padding: 4px;
+    outline: 0;
+}
+
+QListWidget#imageList::item {
+    border-radius: 5px;
+    color: #aebdd0;
+    padding: 6px 8px;
+}
+
+QListWidget#imageList::item:hover {
+    background: #142131;
+    color: #e4eef8;
+}
+
+QListWidget#imageList::item:selected {
+    background: #123044;
+    color: #e6fbff;
 }
 
 QComboBox#propertyField,
@@ -213,8 +235,9 @@ QCheckBox::indicator {
 }
 
 QCheckBox::indicator:checked {
-    background: #0891b2;
-    border-color: #22d3ee;
+    background: #0b121a;
+    border: 1px solid #22d3ee;
+    image: url(:/qt-project.org/styles/commonstyle/images/standardbutton-apply-16.png);
 }
 
 QSlider::groove:horizontal {
