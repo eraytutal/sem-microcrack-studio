@@ -26,6 +26,8 @@ _ICON_NAMES = {
     "zoom_in": "fa5s.search-plus",
     "zoom_out": "fa5s.search-minus",
     "fit": "fa5s.expand-arrows-alt",
+    "previous": "fa5s.chevron-left",
+    "next": "fa5s.chevron-right",
     "accept": "fa5s.check",
     "reject": "fa5s.times",
     "edit": "fa5s.edit",

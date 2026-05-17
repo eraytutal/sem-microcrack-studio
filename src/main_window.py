@@ -23,6 +23,9 @@ from src.pages.dataset_export_page import DatasetExportPage
 from src.pages.manual_annotation_page import ManualAnnotationPage
 
 
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -36,6 +39,9 @@ class MainWindow(QMainWindow):
             ("Dataset & Export", "Dataset status, quality checks, and export placeholders"),
         ]
         self.nav_buttons: list[QPushButton] = []
+        self.current_folder_path: str | None = None
+        self.image_paths: list[str] = []
+        self.current_image_index: int = -1
         self.current_image_path: str | None = None
         self.current_image_size: tuple[int, int] | None = None
 
@@ -133,6 +139,10 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page = ManualAnnotationPage()
         self.dataset_export_page = DatasetExportPage()
         self.assisted_review_page.open_image_requested.connect(self.open_image)
+        self.assisted_review_page.open_folder_requested.connect(self.open_folder)
+        self.assisted_review_page.image_index_selected.connect(self.load_image_at_index)
+        self.assisted_review_page.previous_image_requested.connect(self.load_previous_image)
+        self.assisted_review_page.next_image_requested.connect(self.load_next_image)
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
         self.stack.addWidget(self.dataset_export_page)
@@ -161,7 +171,31 @@ class MainWindow(QMainWindow):
         if not image_path:
             return
 
+        self.current_folder_path = str(Path(image_path).parent)
+        self.image_paths = [image_path]
+        self.current_image_index = 0
+        self.assisted_review_page.set_image_list(self.image_paths, self.current_image_index)
         self.load_image(image_path)
+
+    def open_folder(self) -> None:
+        folder_path = QFileDialog.getExistingDirectory(self, "Open SEM Image Folder")
+        if not folder_path:
+            return
+
+        image_paths = self._collect_image_paths(folder_path)
+        if not image_paths:
+            QMessageBox.information(
+                self,
+                "No Images Found",
+                "No supported SEM image files were found in the selected folder.",
+            )
+            return
+
+        self.current_folder_path = folder_path
+        self.image_paths = image_paths
+        self.current_image_index = 0
+        self.assisted_review_page.set_image_list(self.image_paths, self.current_image_index)
+        self.load_image_at_index(self.current_image_index)
 
     def load_image(self, image_path: str) -> None:
         try:
@@ -173,7 +207,31 @@ class MainWindow(QMainWindow):
 
         self.current_image_path = image_path
         self.current_image_size = (image_size.width(), image_size.height())
+        if image_path in self.image_paths:
+            self.current_image_index = self.image_paths.index(image_path)
+            self.assisted_review_page.set_current_image_index(self.current_image_index)
         self._update_status_bar()
+
+    def load_image_at_index(self, index: int) -> None:
+        if not 0 <= index < len(self.image_paths):
+            return
+
+        self.current_image_index = index
+        self.load_image(self.image_paths[index])
+
+    def load_previous_image(self) -> None:
+        if not self.image_paths:
+            return
+
+        next_index = max(0, self.current_image_index - 1)
+        self.load_image_at_index(next_index)
+
+    def load_next_image(self) -> None:
+        if not self.image_paths:
+            return
+
+        next_index = min(len(self.image_paths) - 1, self.current_image_index + 1)
+        self.load_image_at_index(next_index)
 
     def switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
@@ -197,8 +255,23 @@ class MainWindow(QMainWindow):
         if self.current_image_path and self.current_image_size:
             filename = Path(self.current_image_path).name
             width, height = self.current_image_size
-            self.image_status_label.setText(f"{filename} | {width} x {height}")
+            index_text = self._image_index_status()
+            self.image_status_label.setText(f"{filename} | {width} x {height} | {index_text}")
         else:
             self.image_status_label.setText("No image loaded")
 
         self.current_page_label.setText(page_name)
+
+    def _image_index_status(self) -> str:
+        if self.image_paths and self.current_image_index >= 0:
+            return f"{self.current_image_index + 1} / {len(self.image_paths)}"
+
+        return "1 / 1"
+
+    def _collect_image_paths(self, folder_path: str) -> list[str]:
+        folder = Path(folder_path)
+        return [
+            str(path)
+            for path in sorted(folder.iterdir(), key=lambda item: item.name.lower())
+            if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        ]

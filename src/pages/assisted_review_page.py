@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -17,9 +19,14 @@ from src.widgets.image_viewer import ImageViewer
 
 class AssistedReviewPage(QWidget):
     open_image_requested = Signal()
+    open_folder_requested = Signal()
+    image_index_selected = Signal(int)
+    previous_image_requested = Signal()
+    next_image_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
+        self._updating_image_list = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -32,6 +39,7 @@ class AssistedReviewPage(QWidget):
         content.addWidget(self._build_viewer(), 1)
         content.addWidget(self._build_suggestions_panel())
         layout.addLayout(content, 1)
+        self.set_image_list([])
 
     def _build_action_row(self) -> QWidget:
         row = QFrame()
@@ -51,6 +59,8 @@ class AssistedReviewPage(QWidget):
             button.setIcon(icon(icon_name))
             if text == "Open Image":
                 button.clicked.connect(self.open_image_requested.emit)
+            elif text == "Open Folder":
+                button.clicked.connect(self.open_folder_requested.emit)
             layout.addWidget(button)
 
         layout.addStretch(1)
@@ -84,6 +94,27 @@ class AssistedReviewPage(QWidget):
         layout.setSpacing(12)
 
         title = QLabel("Model Suggestions")
+        image_list_title = QLabel("Image List")
+        image_list_title.setObjectName("panelTitle")
+        layout.addWidget(image_list_title)
+
+        nav_row = QHBoxLayout()
+        self.previous_button = QPushButton("Previous")
+        self.previous_button.setIcon(icon("previous"))
+        self.previous_button.clicked.connect(self.previous_image_requested.emit)
+        self.next_button = QPushButton("Next")
+        self.next_button.setIcon(icon("next"))
+        self.next_button.clicked.connect(self.next_image_requested.emit)
+        nav_row.addWidget(self.previous_button)
+        nav_row.addWidget(self.next_button)
+        layout.addLayout(nav_row)
+
+        self.image_list = QListWidget()
+        self.image_list.setObjectName("imageList")
+        self.image_list.currentRowChanged.connect(self._handle_image_row_changed)
+        layout.addWidget(self.image_list, 1)
+
+        title = QLabel("Model Suggestions")
         title.setObjectName("panelTitle")
         layout.addWidget(title)
 
@@ -108,6 +139,39 @@ class AssistedReviewPage(QWidget):
         layout.addWidget(reject)
         layout.addWidget(edit)
         return panel
+
+    def set_image_list(self, image_paths: list[str], current_index: int = -1) -> None:
+        self._updating_image_list = True
+        self.image_list.clear()
+        for image_path in image_paths:
+            item = QListWidgetItem(image_path)
+            item.setText(image_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1])
+            item.setToolTip(image_path)
+            self.image_list.addItem(item)
+
+        if 0 <= current_index < self.image_list.count():
+            self.image_list.setCurrentRow(current_index)
+
+        has_multiple = self.image_list.count() > 1
+        has_any = self.image_list.count() > 0
+        self.previous_button.setEnabled(has_multiple)
+        self.next_button.setEnabled(has_multiple)
+        self.image_list.setEnabled(has_any)
+        self._updating_image_list = False
+
+    def set_current_image_index(self, index: int) -> None:
+        if not 0 <= index < self.image_list.count():
+            return
+
+        self._updating_image_list = True
+        self.image_list.setCurrentRow(index)
+        self._updating_image_list = False
+
+    def _handle_image_row_changed(self, row: int) -> None:
+        if self._updating_image_list or row < 0:
+            return
+
+        self.image_index_selected.emit(row)
 
     def _prediction_row(self, name: str, confidence: str, state: str) -> QWidget:
         row = QFrame()
