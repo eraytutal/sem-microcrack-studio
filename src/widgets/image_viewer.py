@@ -128,6 +128,27 @@ class ImageViewer(QGraphicsView):
 
         return annotations
 
+    def set_rect_annotations(self, rects: list[dict[str, float]]) -> None:
+        self.clear_annotations()
+        if not self.has_image():
+            return
+
+        image_rect = self._image_rect()
+        for rect_data in rects:
+            rect = QRectF(
+                float(rect_data.get("x", 0.0)),
+                float(rect_data.get("y", 0.0)),
+                float(rect_data.get("width", 0.0)),
+                float(rect_data.get("height", 0.0)),
+            ).normalized()
+            rect = rect.intersected(image_rect)
+            if rect.width() < RECT_MIN_SIZE or rect.height() < RECT_MIN_SIZE:
+                continue
+
+            item = self._make_rect_item(rect)
+            self._scene.addItem(item)
+            self._annotations.append(item)
+
     def mousePressEvent(self, event) -> None:
         if self._can_draw_rectangle(event):
             scene_pos = self._clamp_to_image(self.mapToScene(event.position().toPoint()))

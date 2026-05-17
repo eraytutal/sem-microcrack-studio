@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         self.current_image_index: int = -1
         self.current_image_path: str | None = None
         self.current_image_size: tuple[int, int] | None = None
+        self.manual_annotations_by_image: dict[str, list[dict[str, float]]] = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -200,6 +201,7 @@ class MainWindow(QMainWindow):
         self.open_image_folder()
 
     def load_image(self, image_path: str) -> None:
+        self._save_current_manual_annotations()
         try:
             image_size = self.assisted_review_page.image_viewer.load_image(image_path)
             self.manual_annotation_page.image_viewer.load_image(image_path)
@@ -209,6 +211,7 @@ class MainWindow(QMainWindow):
 
         self.current_image_path = image_path
         self.current_image_size = (image_size.width(), image_size.height())
+        self._restore_manual_annotations(image_path)
         if image_path in self.image_paths:
             self.current_image_index = self.image_paths.index(image_path)
         self.update_navigation_state()
@@ -287,3 +290,15 @@ class MainWindow(QMainWindow):
             for path in sorted(folder.iterdir(), key=lambda item: item.name.lower())
             if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
         ]
+
+    def _save_current_manual_annotations(self) -> None:
+        if not self.current_image_path:
+            return
+
+        self.manual_annotations_by_image[self.current_image_path] = (
+            self.manual_annotation_page.image_viewer.get_rect_annotations()
+        )
+
+    def _restore_manual_annotations(self, image_path: str) -> None:
+        rects = self.manual_annotations_by_image.get(image_path, [])
+        self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
