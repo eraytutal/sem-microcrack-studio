@@ -365,6 +365,9 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     def switch_page(self, index: int) -> None:
+        if index != self.stack.currentIndex() and not self._prepare_for_leaving_current_image():
+            return
+
         self.stack.setCurrentIndex(index)
         page_name, subtitle = self.page_meta[index]
         self.page_title.setText(page_name)
@@ -394,26 +397,28 @@ class MainWindow(QMainWindow):
         self.current_page_label.setText(page_name)
 
     def _prepare_for_image_switch(self) -> bool:
+        return self._prepare_for_leaving_current_image()
+
+    def _prepare_for_leaving_current_image(self) -> bool:
         if self.manual_annotation_page.image_viewer.has_pending_annotation():
             QMessageBox.warning(
                 self,
                 "Pending Annotation",
-                "You have a pending annotation.\nAdd or discard it before closing.",
+                "You have a pending annotation.\nAdd or discard it before leaving.",
             )
             return False
 
         if not self.has_unsaved_changes():
             return True
 
-        choice = self._ask_save_discard_cancel(
+        choice = self._ask_save_or_cancel_changes(
             "Unsaved Changes",
-            "You have unsaved changes for this image.\nSave before switching?",
+            "You have unsaved changes for this image.\nSave or cancel these changes before leaving?",
         )
         if choice == "save":
-            return self.save_current_image_annotations()
-        if choice == "discard":
+            self.save_current_image_annotations()
+        elif choice == "cancel_changes":
             self.discard_current_image_unsaved_changes()
-            return True
         return False
 
     def _confirm_close_with_unsaved_changes(self) -> bool:
@@ -421,42 +426,40 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Pending Annotation",
-                "You have a pending annotation.\nAdd or discard it before switching images.",
+                "You have a pending annotation.\nAdd or discard it before leaving.",
             )
             return False
 
         if not self.has_unsaved_changes():
             return True
 
-        choice = self._ask_save_discard_cancel(
+        choice = self._ask_save_or_cancel_changes(
             "Unsaved Changes",
-            "You have unsaved changes.\nSave before closing?",
+            "You have unsaved changes.\nSave or cancel these changes before closing?",
         )
         if choice == "save":
             return self.save_current_image_annotations()
-        if choice == "discard":
+        if choice == "cancel_changes":
+            self.discard_current_image_unsaved_changes()
             return True
         return False
 
-    def _ask_save_discard_cancel(self, title: str, message: str) -> str:
+    def _ask_save_or_cancel_changes(self, title: str, message: str) -> str:
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Warning)
         dialog.setWindowTitle(title)
         dialog.setText(message)
-        save_button = dialog.addButton("Save", QMessageBox.AcceptRole)
-        discard_button = dialog.addButton("Discard", QMessageBox.DestructiveRole)
-        cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
+        save_button = dialog.addButton("Save Changes", QMessageBox.AcceptRole)
+        cancel_changes_button = dialog.addButton("Cancel Changes", QMessageBox.DestructiveRole)
         dialog.setDefaultButton(save_button)
         dialog.exec()
 
         clicked = dialog.clickedButton()
         if clicked is save_button:
             return "save"
-        if clicked is discard_button:
-            return "discard"
-        if clicked is cancel_button:
-            return "cancel"
-        return "cancel"
+        if clicked is cancel_changes_button:
+            return "cancel_changes"
+        return "cancel_changes"
 
     def discard_current_image_unsaved_changes(self) -> None:
         if not self.current_image_path:
@@ -467,6 +470,7 @@ class MainWindow(QMainWindow):
         self.manual_image_status_by_image[self.current_image_path] = image_status
         self.manual_dirty_by_image[self.current_image_path] = False
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
+        self.manual_annotation_page.image_viewer.clear_selection()
         self.manual_annotation_page.set_image_review_status(image_status)
         self.manual_annotation_page.set_unsaved_changes(False)
 
