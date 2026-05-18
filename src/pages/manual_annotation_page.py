@@ -9,8 +9,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -28,6 +31,7 @@ class ManualAnnotationPage(QWidget):
     save_annotation_requested = Signal()
     mark_no_defect_requested = Signal()
     clear_no_defect_requested = Signal()
+    annotation_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -35,6 +39,7 @@ class ManualAnnotationPage(QWidget):
         self._selected_annotation: dict[str, object] | None = None
         self._panel_mode = "defaults"
         self._image_review_status = "unreviewed"
+        self._syncing_annotation_list = False
         self._default_properties = {
             "label": "crack",
             "source": "manual",
@@ -111,11 +116,24 @@ class ManualAnnotationPage(QWidget):
         panel = QFrame()
         panel.setObjectName("sidePanel")
         panel.setFixedWidth(340)
-        layout = QVBoxLayout(panel)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("sidePanelScroll")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
         layout.addWidget(self._build_review_status_card())
+        layout.addWidget(self._build_annotation_list_card())
+        layout.addWidget(self._build_save_state_card())
 
         self.panel_title = QLabel("New Annotation Defaults")
         self.panel_title.setObjectName("panelTitle")
@@ -142,7 +160,7 @@ class ManualAnnotationPage(QWidget):
         self.exportable_checkbox.setChecked(True)
         self.notes_edit = QTextEdit()
         self.notes_edit.setPlaceholderText("Notes")
-        self.notes_edit.setFixedHeight(120)
+        self.notes_edit.setFixedHeight(90)
 
         self.label_combo.currentTextChanged.connect(self._handle_property_changed)
         self.exportable_checkbox.stateChanged.connect(self._handle_property_changed)
@@ -154,7 +172,6 @@ class ManualAnnotationPage(QWidget):
         form.addRow("", self.exportable_checkbox)
         form.addRow("Notes", self.notes_edit)
         layout.addLayout(form)
-        layout.addStretch(1)
 
         self.add_annotation_button = QPushButton("Add Annotation")
         self.add_annotation_button.setIcon(icon("accept", active=True))
@@ -162,18 +179,15 @@ class ManualAnnotationPage(QWidget):
         self.discard_button = QPushButton("Discard")
         self.discard_button.setIcon(icon("reject"))
         self.discard_button.clicked.connect(self.discard_pending_annotation)
-        self.update_annotation_button = QPushButton("Update Annotation")
-        self.update_annotation_button.setIcon(icon("edit", active=True))
-        self.update_annotation_button.clicked.connect(self.update_selected_annotation)
         self.delete_annotation_button = QPushButton("Delete")
         self.delete_annotation_button.setIcon(icon("delete"))
         self.delete_annotation_button.clicked.connect(self.delete_selected_annotation)
-        self.save_all_button = QPushButton("Save All to JSON")
+        self.save_all_button = QPushButton("Save")
         self.save_all_button.setIcon(icon("save", active=True))
+        self.save_all_button.setToolTip("Save current image annotations to JSON")
         self.save_all_button.clicked.connect(self.save_annotation_requested.emit)
         layout.addWidget(self.add_annotation_button)
         layout.addWidget(self.discard_button)
-        layout.addWidget(self.update_annotation_button)
         layout.addWidget(self.delete_annotation_button)
         layout.addWidget(self.save_all_button)
         self.set_tool_mode("select")
@@ -181,6 +195,9 @@ class ManualAnnotationPage(QWidget):
         self.image_viewer.set_default_annotation_properties(self._default_properties)
         self._set_panel_mode("defaults")
         self._update_review_status_card()
+        layout.addStretch(1)
+        scroll_area.setWidget(content)
+        panel_layout.addWidget(scroll_area)
         return panel
 
     def _build_review_status_card(self) -> QWidget:
@@ -211,6 +228,48 @@ class ManualAnnotationPage(QWidget):
         layout.addWidget(self.clear_no_defect_button)
         return card
 
+    def _build_save_state_card(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("saveStateCard")
+        card.setProperty("saveState", "saved")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+
+        self.save_state_title = QLabel("All changes saved")
+        self.save_state_title.setObjectName("saveStateTitle")
+        self.save_state_helper = QLabel("")
+        self.save_state_helper.setObjectName("saveStateHelper")
+        self.save_state_helper.setWordWrap(True)
+
+        layout.addWidget(self.save_state_title)
+        layout.addWidget(self.save_state_helper)
+        self.save_state_card = card
+        return card
+
+    def _build_annotation_list_card(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("annotationListCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(7)
+
+        title = QLabel("Annotation List")
+        title.setObjectName("annotationListTitle")
+        self.annotation_list = QListWidget()
+        self.annotation_list.setObjectName("annotationList")
+        self.annotation_list.setMaximumHeight(120)
+        self.annotation_list.setMinimumHeight(88)
+        self.annotation_list.currentItemChanged.connect(self._handle_annotation_list_selection)
+        self.annotation_list_empty = QLabel("No confirmed annotations.")
+        self.annotation_list_empty.setObjectName("mutedText")
+        self.annotation_list_empty.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(title)
+        layout.addWidget(self.annotation_list)
+        layout.addWidget(self.annotation_list_empty)
+        return card
+
     def set_tool_mode(self, mode: str) -> None:
         if mode not in {"select", "rectangle"}:
             mode = "select"
@@ -221,7 +280,9 @@ class ManualAnnotationPage(QWidget):
 
     def delete_selected_annotation(self) -> None:
         self.image_viewer.delete_selected_annotation()
+        self._refresh_annotation_list()
         self._update_review_status_card()
+        self.annotation_changed.emit("Annotation deleted. Unsaved changes.")
 
     def clear_selection(self) -> None:
         self.image_viewer.clear_selection()
@@ -230,17 +291,13 @@ class ManualAnnotationPage(QWidget):
         properties = {**self._panel_properties(), "status": "verified"}
         if self.image_viewer.confirm_selected_annotation(properties):
             self.image_viewer.clear_selection()
+            self._refresh_annotation_list()
             self._update_review_status_card()
+            self.annotation_changed.emit("Annotation added. Unsaved changes.")
 
     def discard_pending_annotation(self) -> None:
         self.image_viewer.discard_selected_annotation()
-        self._update_review_status_card()
-
-    def update_selected_annotation(self) -> None:
-        if self._panel_mode != "confirmed":
-            return
-
-        self.image_viewer.update_selected_annotation_properties({**self._panel_properties(), "status": "verified"})
+        self._refresh_annotation_list()
         self._update_review_status_card()
 
     def set_image_review_status(self, status: str) -> None:
@@ -255,6 +312,10 @@ class ManualAnnotationPage(QWidget):
         else:
             self.image_viewer.set_drawing_blocked(None)
         self._update_review_status_card()
+        self._refresh_annotation_list()
+
+    def set_unsaved_changes(self, has_unsaved_changes: bool) -> None:
+        self._update_save_state_ui(has_unsaved_changes)
 
     def image_review_status(self) -> str:
         if self.image_viewer.confirmed_annotation_count() > 0:
@@ -289,6 +350,7 @@ class ManualAnnotationPage(QWidget):
         else:
             self._apply_properties_to_panel(self._default_properties)
             self._set_panel_mode("defaults")
+        self._refresh_annotation_list()
         self._update_review_status_card()
 
     def _handle_property_changed(self, *args) -> None:
@@ -300,6 +362,11 @@ class ManualAnnotationPage(QWidget):
             if self._panel_mode == "pending":
                 self.image_viewer.update_selected_annotation_properties({**properties, "status": "pending"})
                 self._selected_annotation = self.image_viewer.get_selected_annotation()
+            elif self._panel_mode == "confirmed":
+                self.image_viewer.update_selected_annotation_properties({**properties, "status": "verified"})
+                self._selected_annotation = self.image_viewer.get_selected_annotation()
+                self._refresh_annotation_list()
+                self.annotation_changed.emit("Annotation updated. Unsaved changes.")
         else:
             properties["source"] = "manual"
             properties["status"] = "pending"
@@ -339,17 +406,54 @@ class ManualAnnotationPage(QWidget):
         )
         self.add_annotation_button.setVisible(mode == "pending")
         self.discard_button.setVisible(mode == "pending")
-        self.update_annotation_button.setVisible(mode == "confirmed")
         self.delete_annotation_button.setVisible(mode == "confirmed")
         self._update_save_all_state()
 
     def _update_save_all_state(self) -> None:
+        has_pending = self.image_viewer.has_pending_annotation()
         self.save_all_button.setEnabled(
-            (
+            not has_pending
+            and (
                 self.image_viewer.confirmed_annotation_count() > 0
                 or self._image_review_status == "reviewed_no_defect"
             )
-            and not self.image_viewer.has_pending_annotation()
+        )
+        self._update_save_state_ui(
+            self.save_state_card.property("saveState") == "unsaved",
+            force_pending=has_pending,
+        )
+
+    def _update_save_state_ui(
+        self,
+        has_unsaved_changes: bool,
+        force_pending: bool | None = None,
+    ) -> None:
+        has_pending = self.image_viewer.has_pending_annotation() if force_pending is None else force_pending
+        if has_pending:
+            state = "pending"
+            title = "Resolve pending annotation before saving."
+            helper = ""
+        elif has_unsaved_changes:
+            state = "unsaved"
+            title = "Unsaved changes"
+            helper = "Click Save to write changes to JSON."
+        else:
+            state = "saved"
+            title = "All changes saved"
+            helper = ""
+
+        self.save_state_card.setProperty("saveState", state)
+        self.save_state_title.setText(title)
+        self.save_state_helper.setText(helper)
+        self.save_state_card.style().unpolish(self.save_state_card)
+        self.save_state_card.style().polish(self.save_state_card)
+        self.save_all_button.setEnabled(
+            state != "pending"
+            and (
+                has_unsaved_changes
+                or self.image_viewer.confirmed_annotation_count() > 0
+                or self._image_review_status == "reviewed_no_defect"
+            )
         )
 
     def _update_review_status_card(self) -> None:
@@ -397,6 +501,39 @@ class ManualAnnotationPage(QWidget):
             not has_pending and self._image_review_status == "reviewed_no_defect"
         )
         self._update_save_all_state()
+
+    def _refresh_annotation_list(self) -> None:
+        selected_id = ""
+        if self._selected_annotation and self._selected_annotation.get("status") != "pending":
+            selected_id = str(self._selected_annotation.get("annotation_item_id") or "")
+
+        self._syncing_annotation_list = True
+        self.annotation_list.clear()
+        for annotation in self.image_viewer.get_confirmed_annotations():
+            display_id = str(annotation.get("display_id") or "")
+            label = str(annotation.get("label") or "crack")
+            item = QListWidgetItem(f"{display_id} | {label}")
+            item.setData(Qt.UserRole, str(annotation.get("annotation_item_id") or ""))
+            self.annotation_list.addItem(item)
+            if item.data(Qt.UserRole) == selected_id:
+                self.annotation_list.setCurrentItem(item)
+
+        has_annotations = self.annotation_list.count() > 0
+        self.annotation_list.setVisible(has_annotations)
+        self.annotation_list_empty.setVisible(not has_annotations)
+        self._syncing_annotation_list = False
+
+    def _handle_annotation_list_selection(
+        self,
+        current: QListWidgetItem | None,
+        previous: QListWidgetItem | None,
+    ) -> None:
+        if self._syncing_annotation_list or current is None:
+            return
+
+        annotation_item_id = str(current.data(Qt.UserRole) or "")
+        if annotation_item_id:
+            self.image_viewer.select_annotation_by_id(annotation_item_id)
 
     def _show_drawing_blocked_message(self, message: str) -> None:
         QMessageBox.warning(self, "No Defect Mark Active", message)

@@ -137,6 +137,30 @@ class ImageViewer(QGraphicsView):
     def has_pending_annotation(self) -> bool:
         return any(self._is_pending(item) for item in self._annotations)
 
+    def get_confirmed_annotations(self) -> list[dict[str, Any]]:
+        annotations: list[dict[str, Any]] = []
+        confirmed_items = [item for item in self._annotations if self._is_confirmed(item)]
+        for index, item in enumerate(confirmed_items, start=1):
+            annotations.append(
+                {
+                    **self._annotation_snapshot(item),
+                    "display_id": f"ann_{index:03d}",
+                    "annotation_item_id": self._annotation_item_id(item),
+                }
+            )
+
+        return annotations
+
+    def select_annotation_by_id(self, annotation_item_id: str) -> bool:
+        for item in self._annotations:
+            if self._annotation_item_id(item) == annotation_item_id and self._is_confirmed(item):
+                self._scene.clearSelection()
+                item.setSelected(True)
+                self.centerOn(item)
+                return True
+
+        return False
+
     def set_default_annotation_properties(self, properties: dict[str, Any]) -> None:
         self._default_annotation_properties.update(self._normalize_annotation_properties(properties))
 
@@ -364,8 +388,12 @@ class ImageViewer(QGraphicsView):
             "y": rect.y(),
             "width": rect.width(),
             "height": rect.height(),
+            "annotation_item_id": self._annotation_item_id(item),
             **self._item_properties(item),
         }
+
+    def _annotation_item_id(self, item: QGraphicsRectItem) -> str:
+        return str(id(item))
 
     def _item_properties(self, item: QGraphicsRectItem) -> dict[str, Any]:
         data = item.data(ANNOTATION_DATA_ROLE)

@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.current_image_size: tuple[int, int] | None = None
         self.manual_annotations_by_image: dict[str, list[dict[str, object]]] = {}
         self.manual_image_status_by_image: dict[str, str] = {}
+        self.manual_dirty_by_image: dict[str, bool] = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -150,6 +151,7 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.save_annotation_requested.connect(self.save_current_annotation_json)
         self.manual_annotation_page.mark_no_defect_requested.connect(self.mark_current_image_no_defect)
         self.manual_annotation_page.clear_no_defect_requested.connect(self.clear_current_image_no_defect)
+        self.manual_annotation_page.annotation_changed.connect(self.mark_current_image_dirty)
         self.dataset_export_page.refresh_requested.connect(self.refresh_dataset_page)
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
@@ -170,6 +172,9 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status)
 
     def open_image(self) -> None:
+        if not self._prepare_for_image_switch():
+            return
+
         image_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open SEM Image",
@@ -185,6 +190,9 @@ class MainWindow(QMainWindow):
         self.load_image(image_path)
 
     def open_image_folder(self) -> None:
+        if not self._prepare_for_image_switch():
+            return
+
         folder_path = QFileDialog.getExistingDirectory(self, "Open SEM Image Folder")
         if not folder_path:
             return
@@ -229,6 +237,9 @@ class MainWindow(QMainWindow):
         if not 0 <= index < len(self.image_paths):
             return
 
+        if index != self.current_image_index and not self._prepare_for_image_switch():
+            return
+
         self.current_image_index = index
         self.load_image(self.image_paths[index])
 
@@ -260,9 +271,12 @@ class MainWindow(QMainWindow):
         self.dataset_export_page.update_dataset_status(get_dataset_status(self.image_paths))
 
     def save_current_annotation_json(self) -> None:
+        self.save_current_image_annotations()
+
+    def save_current_image_annotations(self) -> bool:
         if not self.current_image_path or not self.current_image_size:
             QMessageBox.warning(self, "No Image Loaded", "Open an image before saving annotations.")
-            return
+            return False
 
         if self.manual_annotation_page.image_viewer.has_pending_annotation():
             QMessageBox.warning(
@@ -270,7 +284,7 @@ class MainWindow(QMainWindow):
                 "Pending Annotation",
                 "Confirm or discard the current annotation before saving.",
             )
-            return
+            return False
 
         rects = self.manual_annotation_page.image_viewer.get_rect_annotations()
         image_status = self._current_manual_image_status()
@@ -283,8 +297,11 @@ class MainWindow(QMainWindow):
             self.manual_annotation_page.annotation_save_context(),
             image_status,
         )
-        self.statusBar().showMessage(f"Saved annotations to {annotation_path}", 4000)
+        self.clear_current_image_dirty()
+        filename = Path(self.current_image_path).name
+        self.statusBar().showMessage(f"Saved annotations for {filename}.", 4000)
         self.refresh_dataset_page()
+        return True
 
     def mark_current_image_no_defect(self) -> None:
         if not self.current_image_path:
@@ -312,6 +329,7 @@ class MainWindow(QMainWindow):
         self.manual_annotations_by_image[self.current_image_path] = []
         self.manual_image_status_by_image[self.current_image_path] = "reviewed_no_defect"
         self.manual_annotation_page.set_image_review_status("reviewed_no_defect")
+        self.mark_current_image_dirty("No Defect status changed. Unsaved changes.")
 
     def clear_current_image_no_defect(self) -> None:
         if not self.current_image_path:
@@ -319,6 +337,32 @@ class MainWindow(QMainWindow):
 
         self.manual_image_status_by_image[self.current_image_path] = "unreviewed"
         self.manual_annotation_page.set_image_review_status("unreviewed")
+        self.mark_current_image_dirty("No Defect status changed. Unsaved changes.")
+
+    def mark_current_image_dirty(self, message: str = "Unsaved changes.") -> None:
+        if not self.current_image_path:
+            return
+
+        self.manual_dirty_by_image[self.current_image_path] = True
+        self._save_current_manual_annotations()
+        self.manual_annotation_page.set_unsaved_changes(True)
+        self.statusBar().showMessage(message, 4000)
+
+    def clear_current_image_dirty(self) -> None:
+        if not self.current_image_path:
+            return
+
+        self.manual_dirty_by_image[self.current_image_path] = False
+        self.manual_annotation_page.set_unsaved_changes(False)
+
+    def has_unsaved_changes(self) -> bool:
+        return bool(self.current_image_path and self.manual_dirty_by_image.get(self.current_image_path, False))
+
+    def closeEvent(self, event) -> None:
+        if self._confirm_close_with_unsaved_changes():
+            event.accept()
+        else:
+            event.ignore()
 
     def switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
@@ -348,6 +392,83 @@ class MainWindow(QMainWindow):
             self.image_status_label.setText("No image loaded")
 
         self.current_page_label.setText(page_name)
+
+    def _prepare_for_image_switch(self) -> bool:
+        if self.manual_annotation_page.image_viewer.has_pending_annotation():
+            QMessageBox.warning(
+                self,
+                "Pending Annotation",
+                "You have a pending annotation.\nAdd or discard it before closing.",
+            )
+            return False
+
+        if not self.has_unsaved_changes():
+            return True
+
+        choice = self._ask_save_discard_cancel(
+            "Unsaved Changes",
+            "You have unsaved changes for this image.\nSave before switching?",
+        )
+        if choice == "save":
+            return self.save_current_image_annotations()
+        if choice == "discard":
+            self.discard_current_image_unsaved_changes()
+            return True
+        return False
+
+    def _confirm_close_with_unsaved_changes(self) -> bool:
+        if self.manual_annotation_page.image_viewer.has_pending_annotation():
+            QMessageBox.warning(
+                self,
+                "Pending Annotation",
+                "You have a pending annotation.\nAdd or discard it before switching images.",
+            )
+            return False
+
+        if not self.has_unsaved_changes():
+            return True
+
+        choice = self._ask_save_discard_cancel(
+            "Unsaved Changes",
+            "You have unsaved changes.\nSave before closing?",
+        )
+        if choice == "save":
+            return self.save_current_image_annotations()
+        if choice == "discard":
+            return True
+        return False
+
+    def _ask_save_discard_cancel(self, title: str, message: str) -> str:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Warning)
+        dialog.setWindowTitle(title)
+        dialog.setText(message)
+        save_button = dialog.addButton("Save", QMessageBox.AcceptRole)
+        discard_button = dialog.addButton("Discard", QMessageBox.DestructiveRole)
+        cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
+        dialog.setDefaultButton(save_button)
+        dialog.exec()
+
+        clicked = dialog.clickedButton()
+        if clicked is save_button:
+            return "save"
+        if clicked is discard_button:
+            return "discard"
+        if clicked is cancel_button:
+            return "cancel"
+        return "cancel"
+
+    def discard_current_image_unsaved_changes(self) -> None:
+        if not self.current_image_path:
+            return
+
+        rects, image_status = self._load_manual_state_from_json(self.current_image_path)
+        self.manual_annotations_by_image[self.current_image_path] = rects
+        self.manual_image_status_by_image[self.current_image_path] = image_status
+        self.manual_dirty_by_image[self.current_image_path] = False
+        self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
+        self.manual_annotation_page.set_image_review_status(image_status)
+        self.manual_annotation_page.set_unsaved_changes(False)
 
     def _image_index_status(self) -> str:
         if self.image_paths and self.current_image_index >= 0:
@@ -386,6 +507,7 @@ class MainWindow(QMainWindow):
 
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
         self.manual_annotation_page.set_image_review_status(image_status)
+        self.manual_annotation_page.set_unsaved_changes(self.manual_dirty_by_image.get(image_path, False))
 
     def _load_manual_state_from_json(self, image_path: str) -> tuple[list[dict[str, object]], str]:
         data = load_annotation_json(image_path)

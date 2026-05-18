@@ -58,6 +58,15 @@ QFrame#summaryCard {
     border-radius: 10px;
 }
 
+QScrollArea#sidePanelScroll {
+    background: transparent;
+    border: 0;
+}
+
+QScrollArea#sidePanelScroll > QWidget > QWidget {
+    background: transparent;
+}
+
 QLabel#pageTitle {
     color: #f8fafc;
     font-size: 16pt;
@@ -81,9 +90,47 @@ QFrame#reviewStatusCard {
     border-radius: 8px;
 }
 
+QFrame#annotationListCard {
+    background: #0d141d;
+    border: 1px solid #243648;
+    border-radius: 8px;
+}
+
+QFrame#saveStateCard {
+    background: #0d141d;
+    border: 1px solid #243648;
+    border-radius: 8px;
+}
+
+QFrame#saveStateCard[saveState="unsaved"],
+QFrame#saveStateCard[saveState="pending"] {
+    background: #1c170b;
+    border-color: #b7791f;
+}
+
+QFrame#saveStateCard[saveState="saved"] {
+    background: #0d1715;
+    border-color: #24483f;
+}
+
 QLabel#reviewStatusTitle {
     color: #f1f5f9;
     font-weight: 700;
+}
+
+QLabel#annotationListTitle {
+    color: #f1f5f9;
+    font-weight: 700;
+}
+
+QLabel#saveStateTitle {
+    color: #f1f5f9;
+    font-weight: 700;
+}
+
+QLabel#saveStateHelper {
+    color: #d8bd7a;
+    font-size: 9pt;
 }
 
 QLabel#reviewStatusBadge {
@@ -252,10 +299,25 @@ QListWidget#imageList {
     outline: 0;
 }
 
+QListWidget#annotationList {
+    background: #0b121a;
+    border: 1px solid #2a4056;
+    border-radius: 7px;
+    color: #dbe7f3;
+    outline: 0;
+    padding: 4px;
+}
+
 QListWidget#imageList::item {
     border-radius: 5px;
     color: #aebdd0;
     padding: 6px 8px;
+}
+
+QListWidget#annotationList::item {
+    border-radius: 5px;
+    color: #aebdd0;
+    padding: 5px 8px;
 }
 
 QListWidget#imageList::item:hover {
@@ -263,7 +325,17 @@ QListWidget#imageList::item:hover {
     color: #e4eef8;
 }
 
+QListWidget#annotationList::item:hover {
+    background: #142131;
+    color: #e4eef8;
+}
+
 QListWidget#imageList::item:selected {
+    background: #123044;
+    color: #e6fbff;
+}
+
+QListWidget#annotationList::item:selected {
     background: #123044;
     color: #e6fbff;
 }
