@@ -29,6 +29,7 @@ DEFAULT_ANNOTATION_PROPERTIES = {
 
 class ImageViewer(QGraphicsView):
     selected_annotation_changed = Signal(object)
+    drawing_blocked = Signal(str)
 
     def __init__(self, placeholder_text: str, parent=None) -> None:
         super().__init__(parent)
@@ -54,6 +55,7 @@ class ImageViewer(QGraphicsView):
         self._annotation_enabled = False
         self._default_annotation_properties = dict(DEFAULT_ANNOTATION_PROPERTIES)
         self._selection_update_in_progress = False
+        self._drawing_blocked_reason: str | None = None
         self._show_placeholder()
 
     def load_image(self, image_path: str) -> QSize:
@@ -138,6 +140,9 @@ class ImageViewer(QGraphicsView):
     def set_default_annotation_properties(self, properties: dict[str, Any]) -> None:
         self._default_annotation_properties.update(self._normalize_annotation_properties(properties))
 
+    def set_drawing_blocked(self, reason: str | None) -> None:
+        self._drawing_blocked_reason = reason
+
     def get_selected_annotation(self) -> dict[str, Any] | None:
         selected = self._selected_annotation_item()
         if not selected:
@@ -208,6 +213,16 @@ class ImageViewer(QGraphicsView):
         self.selected_annotation_changed.emit(None)
 
     def mousePressEvent(self, event) -> None:
+        if (
+            self._annotation_enabled
+            and self._tool_mode == "rectangle"
+            and event.button() == Qt.LeftButton
+            and self._drawing_blocked_reason
+        ):
+            self.drawing_blocked.emit(self._drawing_blocked_reason)
+            event.accept()
+            return
+
         if self._can_draw_rectangle(event):
             scene_pos = self._clamp_to_image(self.mapToScene(event.position().toPoint()))
             self._scene.clearSelection()

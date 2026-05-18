@@ -75,6 +75,52 @@ QLabel#panelTitle {
     font-weight: 700;
 }
 
+QFrame#reviewStatusCard {
+    background: #0d141d;
+    border: 1px solid #243648;
+    border-radius: 8px;
+}
+
+QLabel#reviewStatusTitle {
+    color: #f1f5f9;
+    font-weight: 700;
+}
+
+QLabel#reviewStatusBadge {
+    border-radius: 8px;
+    font-size: 9pt;
+    font-weight: 700;
+    padding: 3px 9px;
+}
+
+QLabel#reviewStatusBadge[reviewStatus="unreviewed"] {
+    background: #18212c;
+    border: 1px solid #465668;
+    color: #cbd5e1;
+}
+
+QLabel#reviewStatusBadge[reviewStatus="annotated"] {
+    background: #123044;
+    border: 1px solid #1d6d89;
+    color: #88e5f7;
+}
+
+QLabel#reviewStatusBadge[reviewStatus="no_defect"] {
+    background: #123326;
+    border: 1px solid #1d7a56;
+    color: #86efac;
+}
+
+QLabel#reviewStatusBadge[reviewStatus="pending"] {
+    background: #3a2a11;
+    border: 1px solid #b7791f;
+    color: #fde68a;
+}
+
+QLabel#reviewStatusHelper {
+    color: #9fb0c4;
+}
+
 QLabel#fieldLabel {
     color: #aebdd0;
     font-weight: 600;

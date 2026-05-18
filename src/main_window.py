@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         self.current_image_path: str | None = None
         self.current_image_size: tuple[int, int] | None = None
         self.manual_annotations_by_image: dict[str, list[dict[str, object]]] = {}
+        self.manual_image_status_by_image: dict[str, str] = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -147,6 +148,8 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.previous_image_requested.connect(self.load_previous_image)
         self.manual_annotation_page.next_image_requested.connect(self.load_next_image)
         self.manual_annotation_page.save_annotation_requested.connect(self.save_current_annotation_json)
+        self.manual_annotation_page.mark_no_defect_requested.connect(self.mark_current_image_no_defect)
+        self.manual_annotation_page.clear_no_defect_requested.connect(self.clear_current_image_no_defect)
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
         self.stack.addWidget(self.dataset_export_page)
@@ -255,15 +258,60 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Image Loaded", "Open an image before saving annotations.")
             return
 
+        if self.manual_annotation_page.image_viewer.has_pending_annotation():
+            QMessageBox.warning(
+                self,
+                "Pending Annotation",
+                "Confirm or discard the current annotation before saving.",
+            )
+            return
+
         rects = self.manual_annotation_page.image_viewer.get_rect_annotations()
+        image_status = self._current_manual_image_status()
         self.manual_annotations_by_image[self.current_image_path] = rects
+        self.manual_image_status_by_image[self.current_image_path] = image_status
         annotation_path = save_annotation_json(
             self.current_image_path,
             self.current_image_size,
             rects,
             self.manual_annotation_page.annotation_save_context(),
+            image_status,
         )
         self.statusBar().showMessage(f"Saved annotations to {annotation_path}", 4000)
+
+    def mark_current_image_no_defect(self) -> None:
+        if not self.current_image_path:
+            QMessageBox.warning(self, "No Image Loaded", "Open an image before marking review status.")
+            return
+
+        viewer = self.manual_annotation_page.image_viewer
+        if viewer.has_pending_annotation():
+            QMessageBox.warning(
+                self,
+                "Pending Annotation",
+                "Confirm or discard the current annotation before marking this image as No Defect.",
+            )
+            return
+
+        if viewer.confirmed_annotation_count() > 0:
+            QMessageBox.warning(
+                self,
+                "Annotations Present",
+                "Remove confirmed annotations before marking this image as No Defect.",
+            )
+            return
+
+        viewer.clear_annotations()
+        self.manual_annotations_by_image[self.current_image_path] = []
+        self.manual_image_status_by_image[self.current_image_path] = "reviewed_no_defect"
+        self.manual_annotation_page.set_image_review_status("reviewed_no_defect")
+
+    def clear_current_image_no_defect(self) -> None:
+        if not self.current_image_path:
+            return
+
+        self.manual_image_status_by_image[self.current_image_path] = "unreviewed"
+        self.manual_annotation_page.set_image_review_status("unreviewed")
 
     def switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
@@ -315,20 +363,27 @@ class MainWindow(QMainWindow):
         self.manual_annotations_by_image[self.current_image_path] = (
             self.manual_annotation_page.image_viewer.get_rect_annotations()
         )
+        self.manual_image_status_by_image[self.current_image_path] = self._current_manual_image_status()
 
     def _restore_manual_annotations(self, image_path: str) -> None:
         if image_path in self.manual_annotations_by_image:
             rects = self.manual_annotations_by_image[image_path]
+            image_status = self.manual_image_status_by_image.get(
+                image_path,
+                "annotated" if rects else "unreviewed",
+            )
         else:
-            rects = self._load_rect_annotations_from_json(image_path)
+            rects, image_status = self._load_manual_state_from_json(image_path)
             self.manual_annotations_by_image[image_path] = rects
+            self.manual_image_status_by_image[image_path] = image_status
 
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
+        self.manual_annotation_page.set_image_review_status(image_status)
 
-    def _load_rect_annotations_from_json(self, image_path: str) -> list[dict[str, object]]:
+    def _load_manual_state_from_json(self, image_path: str) -> tuple[list[dict[str, object]], str]:
         data = load_annotation_json(image_path)
         if not data:
-            return []
+            return [], "unreviewed"
 
         rects: list[dict[str, object]] = []
         for annotation in data.get("annotations", []):
@@ -355,4 +410,23 @@ class MainWindow(QMainWindow):
                 }
             )
 
-        return rects
+        raw_status = str(data.get("image_status") or "")
+        if raw_status in {"unreviewed", "annotated", "reviewed_no_defect"}:
+            image_status = raw_status
+        else:
+            image_status = "annotated" if rects else "unreviewed"
+
+        if rects:
+            image_status = "annotated"
+        elif image_status != "reviewed_no_defect":
+            image_status = "unreviewed"
+
+        return rects, image_status
+
+    def _current_manual_image_status(self) -> str:
+        viewer = self.manual_annotation_page.image_viewer
+        if viewer.confirmed_annotation_count() > 0:
+            return "annotated"
+        if self.manual_annotation_page.image_review_status() == "reviewed_no_defect":
+            return "reviewed_no_defect"
+        return "unreviewed"

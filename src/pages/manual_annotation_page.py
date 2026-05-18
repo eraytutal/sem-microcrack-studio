@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTextEdit,
     QToolButton,
@@ -25,12 +26,15 @@ class ManualAnnotationPage(QWidget):
     previous_image_requested = Signal()
     next_image_requested = Signal()
     save_annotation_requested = Signal()
+    mark_no_defect_requested = Signal()
+    clear_no_defect_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self._loading_properties = False
         self._selected_annotation: dict[str, object] | None = None
         self._panel_mode = "defaults"
+        self._image_review_status = "unreviewed"
         self._default_properties = {
             "label": "crack",
             "source": "manual",
@@ -95,6 +99,7 @@ class ManualAnnotationPage(QWidget):
         self.image_viewer.set_annotation_enabled(True)
         self.image_viewer.set_tool_mode("select")
         self.image_viewer.selected_annotation_changed.connect(self._handle_selected_annotation_changed)
+        self.image_viewer.drawing_blocked.connect(self._show_drawing_blocked_message)
         self.navigation_bar = ImageNavigationBar()
         self.navigation_bar.previous_requested.connect(self.previous_image_requested.emit)
         self.navigation_bar.next_requested.connect(self.next_image_requested.emit)
@@ -109,6 +114,8 @@ class ManualAnnotationPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
+
+        layout.addWidget(self._build_review_status_card())
 
         self.panel_title = QLabel("New Annotation Defaults")
         self.panel_title.setObjectName("panelTitle")
@@ -173,7 +180,36 @@ class ManualAnnotationPage(QWidget):
         self._apply_properties_to_panel(self._default_properties)
         self.image_viewer.set_default_annotation_properties(self._default_properties)
         self._set_panel_mode("defaults")
+        self._update_review_status_card()
         return panel
+
+    def _build_review_status_card(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("reviewStatusCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(7)
+
+        title = QLabel("Image Review Status")
+        title.setObjectName("reviewStatusTitle")
+        self.review_status_badge = QLabel("Unreviewed")
+        self.review_status_badge.setObjectName("reviewStatusBadge")
+        self.review_status_badge.setProperty("reviewStatus", "unreviewed")
+        self.review_status_helper = QLabel()
+        self.review_status_helper.setObjectName("reviewStatusHelper")
+        self.review_status_helper.setWordWrap(True)
+
+        self.mark_no_defect_button = QPushButton("Mark as No Defect")
+        self.mark_no_defect_button.clicked.connect(self.mark_no_defect_requested.emit)
+        self.clear_no_defect_button = QPushButton("Clear No Defect")
+        self.clear_no_defect_button.clicked.connect(self.clear_no_defect_requested.emit)
+
+        layout.addWidget(title)
+        layout.addWidget(self.review_status_badge, 0, Qt.AlignLeft)
+        layout.addWidget(self.review_status_helper)
+        layout.addWidget(self.mark_no_defect_button)
+        layout.addWidget(self.clear_no_defect_button)
+        return card
 
     def set_tool_mode(self, mode: str) -> None:
         if mode not in {"select", "rectangle"}:
@@ -185,6 +221,7 @@ class ManualAnnotationPage(QWidget):
 
     def delete_selected_annotation(self) -> None:
         self.image_viewer.delete_selected_annotation()
+        self._update_review_status_card()
 
     def clear_selection(self) -> None:
         self.image_viewer.clear_selection()
@@ -193,18 +230,38 @@ class ManualAnnotationPage(QWidget):
         properties = {**self._panel_properties(), "status": "verified"}
         if self.image_viewer.confirm_selected_annotation(properties):
             self.image_viewer.clear_selection()
-            self._update_save_all_state()
+            self._update_review_status_card()
 
     def discard_pending_annotation(self) -> None:
         self.image_viewer.discard_selected_annotation()
-        self._update_save_all_state()
+        self._update_review_status_card()
 
     def update_selected_annotation(self) -> None:
         if self._panel_mode != "confirmed":
             return
 
         self.image_viewer.update_selected_annotation_properties({**self._panel_properties(), "status": "verified"})
-        self._update_save_all_state()
+        self._update_review_status_card()
+
+    def set_image_review_status(self, status: str) -> None:
+        if status not in {"unreviewed", "annotated", "reviewed_no_defect"}:
+            status = "unreviewed"
+
+        self._image_review_status = status
+        if status == "reviewed_no_defect":
+            self.image_viewer.set_drawing_blocked(
+                "This image is marked as No Defect. Clear the No Defect mark before adding annotations."
+            )
+        else:
+            self.image_viewer.set_drawing_blocked(None)
+        self._update_review_status_card()
+
+    def image_review_status(self) -> str:
+        if self.image_viewer.confirmed_annotation_count() > 0:
+            return "annotated"
+        if self._image_review_status == "reviewed_no_defect":
+            return "reviewed_no_defect"
+        return "unreviewed"
 
     def set_navigation_state(
         self,
@@ -232,6 +289,7 @@ class ManualAnnotationPage(QWidget):
         else:
             self._apply_properties_to_panel(self._default_properties)
             self._set_panel_mode("defaults")
+        self._update_review_status_card()
 
     def _handle_property_changed(self, *args) -> None:
         if self._loading_properties:
@@ -287,6 +345,58 @@ class ManualAnnotationPage(QWidget):
 
     def _update_save_all_state(self) -> None:
         self.save_all_button.setEnabled(
-            self.image_viewer.confirmed_annotation_count() > 0
+            (
+                self.image_viewer.confirmed_annotation_count() > 0
+                or self._image_review_status == "reviewed_no_defect"
+            )
             and not self.image_viewer.has_pending_annotation()
         )
+
+    def _update_review_status_card(self) -> None:
+        confirmed_count = self.image_viewer.confirmed_annotation_count()
+        has_pending = self.image_viewer.has_pending_annotation()
+
+        if confirmed_count > 0 and self._image_review_status != "annotated":
+            self._image_review_status = "annotated"
+        elif confirmed_count == 0 and self._image_review_status == "annotated":
+            self._image_review_status = "unreviewed"
+
+        if has_pending:
+            status_key = "pending"
+            status_text = "Pending Annotation"
+            helper_text = "Confirm or discard the current annotation before saving."
+        elif self._image_review_status == "reviewed_no_defect":
+            status_key = "no_defect"
+            status_text = "No Defect"
+            helper_text = "This image was reviewed and marked as no defect."
+        elif confirmed_count > 0:
+            status_key = "annotated"
+            status_text = "Annotated"
+            helper_text = f"Confirmed annotations: {confirmed_count}"
+        else:
+            status_key = "unreviewed"
+            status_text = "Unreviewed"
+            helper_text = (
+                "No confirmed annotations yet. Draw an annotation or mark this image as No Defect."
+            )
+
+        self.review_status_badge.setText(status_text)
+        self.review_status_badge.setProperty("reviewStatus", status_key)
+        self.review_status_badge.style().unpolish(self.review_status_badge)
+        self.review_status_badge.style().polish(self.review_status_badge)
+        self.review_status_helper.setText(helper_text)
+
+        can_mark_no_defect = (
+            not has_pending
+            and confirmed_count == 0
+            and self._image_review_status != "reviewed_no_defect"
+        )
+        self.mark_no_defect_button.setVisible(can_mark_no_defect)
+        self.mark_no_defect_button.setEnabled(can_mark_no_defect)
+        self.clear_no_defect_button.setVisible(
+            not has_pending and self._image_review_status == "reviewed_no_defect"
+        )
+        self._update_save_all_state()
+
+    def _show_drawing_blocked_message(self, message: str) -> None:
+        QMessageBox.warning(self, "No Defect Mark Active", message)

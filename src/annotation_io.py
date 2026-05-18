@@ -26,6 +26,7 @@ def save_annotation_json(
     image_size: tuple[int, int],
     annotations: list[dict[str, Any]],
     metadata: dict[str, Any],
+    image_status: str = "unreviewed",
 ) -> Path:
     ANNOTATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -39,6 +40,7 @@ def save_annotation_json(
             "width": width,
             "height": height,
         },
+        "image_status": _normalize_image_status(image_status, annotations),
         "metadata": {
             "material": str(metadata.get("material", "")),
             "magnification": str(metadata.get("magnification", "")),
@@ -61,6 +63,14 @@ def save_annotation_json(
         file.write("\n")
 
     return annotation_path
+
+
+def _normalize_image_status(image_status: str, annotations: list[dict[str, Any]]) -> str:
+    if annotations:
+        return "annotated"
+    if image_status == "reviewed_no_defect":
+        return "reviewed_no_defect"
+    return "unreviewed"
 
 
 def _annotation_payload(
