@@ -31,6 +31,102 @@
       "exportable_to_mask": true,
       "status": "verified",
       "notes": ""
+    },
+    {
+      "id": "ann_002",
+      "label": "crack",
+      "shape_type": "rectangle",
+      "bbox": [
+        151.4663951120163,
+        135.09164969450103,
+        139.18533604887983,
+        128.9511201629328
+      ],
+      "source": "manual",
+      "confidence": 0.15,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
+    },
+    {
+      "id": "ann_003",
+      "label": "scratch",
+      "shape_type": "rectangle",
+      "bbox": [
+        380.71283095723015,
+        335.68228105906314,
+        159.65376782077396,
+        149.41955193482687
+      ],
+      "source": "manual",
+      "confidence": 0.15,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
+    },
+    {
+      "id": "ann_004",
+      "label": "pit",
+      "shape_type": "rectangle",
+      "bbox": [
+        609.959266802444,
+        534.2260692464358,
+        169.887983706721,
+        88.01425661914459
+      ],
+      "source": "manual",
+      "confidence": 0.15,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
+    },
+    {
+      "id": "ann_005",
+      "label": "pit",
+      "shape_type": "rectangle",
+      "bbox": [
+        644.7556008146639,
+        171.93482688391038,
+        126.90427698574342,
+        79.82688391038698
+      ],
+      "source": "manual",
+      "confidence": 0.15,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
+    },
+    {
+      "id": "ann_006",
+      "label": "pit",
+      "shape_type": "rectangle",
+      "bbox": [
+        233.34012219959266,
+        483.0549898167006,
+        157.60692464358453,
+        188.3095723014257
+      ],
+      "source": "manual",
+      "confidence": 0.15,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
+    },
+    {
+      "id": "ann_007",
+      "label": "pit",
+      "shape_type": "rectangle",
+      "bbox": [
+        833.0651731160896,
+        77.78004073319755,
+        102.34215885947049,
+        47.07739307535641
+      ],
+      "source": "manual",
+      "confidence": 0.15,
+      "exportable_to_mask": true,
+      "status": "verified",
+      "notes": ""
     }
   ]
 }

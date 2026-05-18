@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
         self.current_image_index: int = -1
         self.current_image_path: str | None = None
         self.current_image_size: tuple[int, int] | None = None
-        self.manual_annotations_by_image: dict[str, list[dict[str, float]]] = {}
+        self.manual_annotations_by_image: dict[str, list[dict[str, object]]] = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -325,12 +325,12 @@ class MainWindow(QMainWindow):
 
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
 
-    def _load_rect_annotations_from_json(self, image_path: str) -> list[dict[str, float]]:
+    def _load_rect_annotations_from_json(self, image_path: str) -> list[dict[str, object]]:
         data = load_annotation_json(image_path)
         if not data:
             return []
 
-        rects: list[dict[str, float]] = []
+        rects: list[dict[str, object]] = []
         for annotation in data.get("annotations", []):
             if annotation.get("shape_type") != "rectangle":
                 continue
@@ -346,6 +346,12 @@ class MainWindow(QMainWindow):
                     "y": float(y),
                     "width": float(width),
                     "height": float(height),
+                    "label": str(annotation.get("label") or "crack"),
+                    "source": str(annotation.get("source") or "manual"),
+                    "confidence": annotation.get("confidence"),
+                    "exportable_to_mask": bool(annotation.get("exportable_to_mask", True)),
+                    "status": str(annotation.get("status") or "verified"),
+                    "notes": str(annotation.get("notes") or ""),
                 }
             )
 

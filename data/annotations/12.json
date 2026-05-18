@@ -1,7 +1,7 @@
 {
   "image": {
-    "filename": "11.tif",
-    "path": "C:/Users/User/Desktop/bitirme-veri/datasets/images/test/11.tif",
+    "filename": "12.tif",
+    "path": "C:/Users/User/Desktop/bitirme-veri/datasets/images/test/12.tif",
     "width": 1024,
     "height": 1005
   },
@@ -18,13 +18,13 @@
   "annotations": [
     {
       "id": "ann_001",
-      "label": "scratch",
+      "label": "crack",
       "shape_type": "rectangle",
       "bbox": [
-        85.89473684210526,
-        107.78947368421052,
-        291.36842105263156,
-        363.7894736842105
+        112.57637474541751,
+        141.23217922606923,
+        464.6334012219959,
+        352.05702647657847
       ],
       "source": "manual",
       "confidence": null,

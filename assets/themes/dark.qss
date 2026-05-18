@@ -191,6 +191,7 @@ QLabel#summaryLabel {
 QComboBox,
 QDoubleSpinBox,
 QTextEdit,
+QLineEdit,
 QListWidget {
     background: #0b121a;
     border: 1px solid #2a4056;
@@ -222,7 +223,8 @@ QListWidget#imageList::item:selected {
 }
 
 QComboBox#propertyField,
-QDoubleSpinBox#propertyField {
+QDoubleSpinBox#propertyField,
+QLineEdit#propertyField {
     background: #0f1a25;
     border: 1px solid #3a5870;
     border-left: 3px solid #22d3ee;
@@ -232,7 +234,8 @@ QDoubleSpinBox#propertyField {
 }
 
 QComboBox#propertyField:hover,
-QDoubleSpinBox#propertyField:hover {
+QDoubleSpinBox#propertyField:hover,
+QLineEdit#propertyField:hover {
     border-color: #4a7895;
     border-left-color: #67e8f9;
 }
@@ -240,6 +243,34 @@ QDoubleSpinBox#propertyField:hover {
 QComboBox::drop-down {
     border: 0;
     width: 22px;
+}
+
+QComboBox QAbstractItemView {
+    background: #0b121a;
+    border: 1px solid #2a4056;
+    border-radius: 6px;
+    color: #dbe7f3;
+    selection-background-color: #123044;
+    selection-color: #e6fbff;
+    outline: 0;
+    padding: 4px;
+}
+
+QComboBox QAbstractItemView::item {
+    min-height: 24px;
+    padding: 5px 8px;
+    color: #dbe7f3;
+}
+
+QComboBox QAbstractItemView::item:hover,
+QComboBox QAbstractItemView::item:selected {
+    background: #123044;
+    color: #e6fbff;
+}
+
+QLineEdit#propertyField[readOnly="true"] {
+    color: #aebdd0;
+    background: #0d1721;
 }
 
 QTextEdit {

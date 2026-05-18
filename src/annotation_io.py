@@ -24,15 +24,12 @@ def load_annotation_json(image_path: str) -> dict[str, Any] | None:
 def save_annotation_json(
     image_path: str,
     image_size: tuple[int, int],
-    annotations: list[dict[str, float]],
+    annotations: list[dict[str, Any]],
     metadata: dict[str, Any],
 ) -> Path:
     ANNOTATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
     image = Path(image_path)
-    label = str(metadata.pop("label", "crack"))
-    exportable_to_mask = bool(metadata.pop("exportable_to_mask", True))
-    annotation_notes = str(metadata.pop("annotation_notes", ""))
     width, height = image_size
 
     payload = {
@@ -53,7 +50,7 @@ def save_annotation_json(
             "notes": str(metadata.get("notes", "")),
         },
         "annotations": [
-            _annotation_payload(index, rect, label, exportable_to_mask, annotation_notes)
+            _annotation_payload(index, rect)
             for index, rect in enumerate(annotations, start=1)
         ],
     }
@@ -68,14 +65,11 @@ def save_annotation_json(
 
 def _annotation_payload(
     index: int,
-    rect: dict[str, float],
-    label: str,
-    exportable_to_mask: bool,
-    notes: str,
+    rect: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "id": f"ann_{index:03d}",
-        "label": label,
+        "label": str(rect.get("label") or "crack"),
         "shape_type": "rectangle",
         "bbox": [
             float(rect.get("x", 0.0)),
@@ -83,9 +77,9 @@ def _annotation_payload(
             float(rect.get("width", 0.0)),
             float(rect.get("height", 0.0)),
         ],
-        "source": "manual",
-        "confidence": None,
-        "exportable_to_mask": exportable_to_mask,
-        "status": "verified",
-        "notes": notes,
+        "source": str(rect.get("source") or "manual"),
+        "confidence": rect.get("confidence"),
+        "exportable_to_mask": bool(rect.get("exportable_to_mask", True)),
+        "status": str(rect.get("status") or "verified"),
+        "notes": str(rect.get("notes") or ""),
     }
