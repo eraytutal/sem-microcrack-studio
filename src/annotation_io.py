@@ -17,8 +17,57 @@ def load_annotation_json(image_path: str) -> dict[str, Any] | None:
     if not annotation_path.exists():
         return None
 
-    with annotation_path.open("r", encoding="utf-8") as file:
-        return json.load(file)
+    try:
+        with annotation_path.open("r", encoding="utf-8") as file:
+            return json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def get_image_annotation_status(image_path: str) -> dict[str, Any]:
+    data = load_annotation_json(image_path)
+    if not data:
+        return {
+            "image_path": image_path,
+            "filename": Path(image_path).name,
+            "status": "Unreviewed",
+            "annotation_count": 0,
+        }
+
+    annotations = data.get("annotations", [])
+    annotation_count = len(annotations) if isinstance(annotations, list) else 0
+    image_status = data.get("image_status")
+
+    if image_status == "annotated":
+        status = "Annotated"
+    elif image_status == "reviewed_no_defect":
+        status = "No Defect"
+    elif image_status == "unreviewed":
+        status = "Unreviewed"
+    else:
+        status = "Annotated" if annotation_count > 0 else "Unreviewed"
+
+    return {
+        "image_path": image_path,
+        "filename": Path(image_path).name,
+        "status": status,
+        "annotation_count": annotation_count,
+    }
+
+
+def get_dataset_status(image_paths: list[str]) -> dict[str, Any]:
+    rows = [get_image_annotation_status(image_path) for image_path in image_paths]
+    annotated = sum(1 for row in rows if row["status"] == "Annotated")
+    no_defect = sum(1 for row in rows if row["status"] == "No Defect")
+    unreviewed = sum(1 for row in rows if row["status"] == "Unreviewed")
+
+    return {
+        "total_images": len(rows),
+        "annotated_images": annotated,
+        "no_defect_images": no_defect,
+        "unreviewed_images": unreviewed,
+        "rows": rows,
+    }
 
 
 def save_annotation_json(

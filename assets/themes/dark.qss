@@ -268,6 +268,31 @@ QListWidget#imageList::item:selected {
     color: #e6fbff;
 }
 
+QTableWidget#datasetStatusTable {
+    background: #0b121a;
+    alternate-background-color: #0f1720;
+    border: 1px solid #2a4056;
+    border-radius: 8px;
+    color: #dbe7f3;
+    gridline-color: #223244;
+    outline: 0;
+    selection-background-color: #123044;
+    selection-color: #e6fbff;
+}
+
+QTableWidget#datasetStatusTable::item {
+    padding: 6px 8px;
+}
+
+QHeaderView::section {
+    background: #111923;
+    border: 0;
+    border-bottom: 1px solid #2a4056;
+    color: #aebdd0;
+    font-weight: 700;
+    padding: 7px 8px;
+}
+
 QComboBox#propertyField,
 QDoubleSpinBox#propertyField,
 QLineEdit#propertyField {

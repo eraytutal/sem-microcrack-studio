@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.annotation_io import load_annotation_json, save_annotation_json
+from src.annotation_io import get_dataset_status, load_annotation_json, save_annotation_json
 from src.icons import icon
 from src.pages.assisted_review_page import AssistedReviewPage
 from src.pages.dataset_export_page import DatasetExportPage
@@ -150,6 +150,7 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.save_annotation_requested.connect(self.save_current_annotation_json)
         self.manual_annotation_page.mark_no_defect_requested.connect(self.mark_current_image_no_defect)
         self.manual_annotation_page.clear_no_defect_requested.connect(self.clear_current_image_no_defect)
+        self.dataset_export_page.refresh_requested.connect(self.refresh_dataset_page)
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
         self.stack.addWidget(self.dataset_export_page)
@@ -201,6 +202,7 @@ class MainWindow(QMainWindow):
         self.image_paths = image_paths
         self.current_image_index = 0
         self.load_image_at_index(self.current_image_index)
+        self.refresh_dataset_page()
 
     def open_folder(self) -> None:
         self.open_image_folder()
@@ -220,6 +222,7 @@ class MainWindow(QMainWindow):
         if image_path in self.image_paths:
             self.current_image_index = self.image_paths.index(image_path)
         self.update_navigation_state()
+        self.refresh_dataset_page()
         self._update_status_bar()
 
     def load_image_at_index(self, index: int) -> None:
@@ -253,6 +256,9 @@ class MainWindow(QMainWindow):
         for page in (self.assisted_review_page, self.manual_annotation_page):
             page.set_navigation_state(filename, display_index, total_count, can_go_previous, can_go_next)
 
+    def refresh_dataset_page(self) -> None:
+        self.dataset_export_page.update_dataset_status(get_dataset_status(self.image_paths))
+
     def save_current_annotation_json(self) -> None:
         if not self.current_image_path or not self.current_image_size:
             QMessageBox.warning(self, "No Image Loaded", "Open an image before saving annotations.")
@@ -278,6 +284,7 @@ class MainWindow(QMainWindow):
             image_status,
         )
         self.statusBar().showMessage(f"Saved annotations to {annotation_path}", 4000)
+        self.refresh_dataset_page()
 
     def mark_current_image_no_defect(self) -> None:
         if not self.current_image_path:
