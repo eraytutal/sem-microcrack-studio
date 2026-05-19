@@ -86,6 +86,12 @@ class ManualAnnotationPage(QWidget):
             button.setToolTip(text)
             button.setIcon(icon(icon_name))
             button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            if text == "Polygon":
+                button.setEnabled(False)
+                button.setToolTip(
+                    "Polygon drawing is not implemented yet. "
+                    "This version can display polygon annotations loaded from JSON."
+                )
             if text in {"Select", "Rectangle"}:
                 button.setCheckable(True)
                 button.clicked.connect(lambda checked=False, mode=icon_name: self.set_tool_mode(mode))
@@ -375,10 +381,16 @@ class ManualAnnotationPage(QWidget):
             self.source_field.setText("manual")
 
     def _panel_properties(self) -> dict[str, object]:
+        source = "manual"
+        confidence = None
+        if self._selected_annotation:
+            source = str(self._selected_annotation.get("source") or "manual")
+            confidence = self._selected_annotation.get("confidence")
+
         return {
             "label": self.label_combo.currentText(),
-            "source": "manual",
-            "confidence": None,
+            "source": source,
+            "confidence": confidence,
             "exportable_to_mask": self.exportable_checkbox.isChecked(),
             "status": "pending" if self._panel_mode != "confirmed" else "verified",
             "notes": self.notes_edit.toPlainText(),
@@ -389,8 +401,13 @@ class ManualAnnotationPage(QWidget):
         label = str(properties.get("label") or self._default_properties["label"])
         label_index = self.label_combo.findText(label)
         self.label_combo.setCurrentIndex(max(label_index, 0))
-        self.source_field.setText("manual")
-        self.confidence_field.setText("--")
+        self.source_field.setText(str(properties.get("source") or "manual"))
+        confidence = properties.get("confidence")
+        try:
+            confidence_text = "--" if confidence in (None, "") else f"{float(confidence):.2f}"
+        except (TypeError, ValueError):
+            confidence_text = "--"
+        self.confidence_field.setText(confidence_text)
         self.exportable_checkbox.setChecked(bool(properties.get("exportable_to_mask", True)))
         self.notes_edit.setPlainText(str(properties.get("notes") or ""))
         self._loading_properties = False

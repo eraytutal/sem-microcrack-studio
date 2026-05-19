@@ -4,15 +4,18 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QSize, Signal
-from PySide6.QtGui import QBrush, QColor, QImageReader, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImageReader, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsPixmapItem,
+    QGraphicsPolygonItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsTextItem,
     QGraphicsView,
 )
+
+from src.annotation_model import is_polygon_annotation, normalize_annotation
 
 
 RECT_MIN_SIZE = 3.0
@@ -25,6 +28,8 @@ DEFAULT_ANNOTATION_PROPERTIES = {
     "status": "pending",
     "notes": "",
 }
+
+AnnotationGraphicsItem = QGraphicsRectItem | QGraphicsPolygonItem
 
 
 class ImageViewer(QGraphicsView):
@@ -49,7 +54,7 @@ class ImageViewer(QGraphicsView):
         self._placeholder_text = placeholder_text
         self._placeholder_item: QGraphicsTextItem | None = None
         self._tool_mode = "select"
-        self._annotations: list[QGraphicsRectItem] = []
+        self._annotations: list[AnnotationGraphicsItem] = []
         self._draft_rect_item: QGraphicsRectItem | None = None
         self._draft_origin: QPointF | None = None
         self._annotation_enabled = False
@@ -206,7 +211,7 @@ class ImageViewer(QGraphicsView):
             self._annotations.remove(selected)
             self.selected_annotation_changed.emit(None)
 
-    def get_rect_annotations(self) -> list[dict[str, Any]]:
+    def get_annotations(self) -> list[dict[str, Any]]:
         annotations: list[dict[str, Any]] = []
         for item in self._annotations:
             if self._is_confirmed(item):
@@ -214,27 +219,42 @@ class ImageViewer(QGraphicsView):
 
         return annotations
 
-    def set_rect_annotations(self, rects: list[dict[str, Any]]) -> None:
+    def get_rect_annotations(self) -> list[dict[str, Any]]:
+        return [
+            annotation
+            for annotation in self.get_annotations()
+            if annotation.get("shape_type") == "rectangle"
+        ]
+
+    def set_annotations(self, annotations: list[dict[str, Any]]) -> None:
         self.clear_annotations()
         if not self.has_image():
             return
 
         image_rect = self._image_rect()
-        for rect_data in rects:
-            rect = self._rect_from_annotation(rect_data)
-            rect = rect.intersected(image_rect)
-            if rect.width() < RECT_MIN_SIZE or rect.height() < RECT_MIN_SIZE:
+        for annotation_data in annotations:
+            annotation = normalize_annotation(annotation_data)
+            if is_polygon_annotation(annotation):
+                item = self._item_from_polygon_annotation(annotation)
+            else:
+                item = self._item_from_rectangle_annotation(annotation, image_rect)
+
+            if item is None:
                 continue
 
-            item = self._make_rect_item(rect)
             item.setData(
                 ANNOTATION_DATA_ROLE,
-                self._normalize_annotation_properties({**rect_data, "status": rect_data.get("status", "verified")}),
+                self._normalize_annotation_properties(
+                    {**annotation, "status": annotation.get("status", "verified")}
+                ),
             )
             self._scene.addItem(item)
             self._annotations.append(item)
             self._update_badge(item)
         self.selected_annotation_changed.emit(None)
+
+    def set_rect_annotations(self, rects: list[dict[str, Any]]) -> None:
+        self.set_annotations(rects)
 
     def mousePressEvent(self, event) -> None:
         if (
@@ -374,29 +394,42 @@ class ImageViewer(QGraphicsView):
         else:
             self.selected_annotation_changed.emit(None)
 
-    def _selected_annotation_item(self) -> QGraphicsRectItem | None:
+    def _selected_annotation_item(self) -> AnnotationGraphicsItem | None:
         for item in self._scene.selectedItems():
             if item in self._annotations:
                 return item
 
         return None
 
-    def _annotation_snapshot(self, item: QGraphicsRectItem) -> dict[str, Any]:
+    def _annotation_snapshot(self, item: AnnotationGraphicsItem) -> dict[str, Any]:
+        properties = self._item_properties(item)
+        if isinstance(item, QGraphicsPolygonItem):
+            points = [[point.x(), point.y()] for point in item.polygon()]
+            bbox = self._item_bounds(item)
+            return {
+                **properties,
+                "annotation_item_id": self._annotation_item_id(item),
+                "shape_type": "polygon",
+                "points": points,
+                "bbox": [bbox.x(), bbox.y(), bbox.width(), bbox.height()],
+            }
+
         rect = item.rect().normalized()
         return {
+            **properties,
             "x": rect.x(),
             "y": rect.y(),
             "width": rect.width(),
             "height": rect.height(),
+            "bbox": [rect.x(), rect.y(), rect.width(), rect.height()],
             "annotation_item_id": self._annotation_item_id(item),
             "shape_type": "rectangle",
-            **self._item_properties(item),
         }
 
-    def _annotation_item_id(self, item: QGraphicsRectItem) -> str:
+    def _annotation_item_id(self, item: AnnotationGraphicsItem) -> str:
         return str(id(item))
 
-    def _item_properties(self, item: QGraphicsRectItem) -> dict[str, Any]:
+    def _item_properties(self, item: AnnotationGraphicsItem) -> dict[str, Any]:
         data = item.data(ANNOTATION_DATA_ROLE)
         if not isinstance(data, dict):
             data = {}
@@ -406,6 +439,9 @@ class ImageViewer(QGraphicsView):
     def _normalize_annotation_properties(self, properties: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(DEFAULT_ANNOTATION_PROPERTIES)
         normalized.update({key: properties[key] for key in normalized if key in properties})
+        for key in ("id", "shape_type", "points", "bbox"):
+            if key in properties:
+                normalized[key] = properties[key]
         normalized["label"] = str(normalized.get("label") or "crack")
         normalized["source"] = str(normalized.get("source") or "manual")
         normalized["status"] = str(normalized.get("status") or "pending")
@@ -416,13 +452,13 @@ class ImageViewer(QGraphicsView):
         normalized["confidence"] = None if confidence in (None, "") else float(confidence)
         return normalized
 
-    def _is_pending(self, item: QGraphicsRectItem) -> bool:
+    def _is_pending(self, item: AnnotationGraphicsItem) -> bool:
         return self._item_properties(item).get("status") == "pending"
 
-    def _is_confirmed(self, item: QGraphicsRectItem) -> bool:
+    def _is_confirmed(self, item: AnnotationGraphicsItem) -> bool:
         return not self._is_pending(item)
 
-    def _annotation_pen_for_item(self, item: QGraphicsRectItem, selected: bool) -> QPen:
+    def _annotation_pen_for_item(self, item: AnnotationGraphicsItem, selected: bool) -> QPen:
         if self._is_pending(item):
             pen = QPen(QColor("#f59e0b"), 2.0)
             pen.setStyle(Qt.DashLine)
@@ -431,13 +467,13 @@ class ImageViewer(QGraphicsView):
 
         return self._annotation_pen(selected=selected)
 
-    def _annotation_brush_for_item(self, item: QGraphicsRectItem, selected: bool) -> QBrush:
+    def _annotation_brush_for_item(self, item: AnnotationGraphicsItem, selected: bool) -> QBrush:
         if self._is_pending(item):
             return QBrush(QColor(245, 158, 11, 50))
 
         return self._annotation_brush(selected=selected)
 
-    def _update_badge(self, item: QGraphicsRectItem) -> None:
+    def _update_badge(self, item: AnnotationGraphicsItem) -> None:
         badge_rect = getattr(item, "_label_badge_rect", None)
         badge_text = getattr(item, "_label_badge_text", None)
 
@@ -470,11 +506,60 @@ class ImageViewer(QGraphicsView):
         text_rect = badge_text.boundingRect()
         width = max(34.0, text_rect.width() + 10.0)
         height = text_rect.height() + 2.0
-        item_rect = item.rect().normalized()
+        item_rect = self._item_bounds(item)
         badge_rect.setRect(item_rect.left(), item_rect.top() - height, width, height)
         badge_text.setPos(item_rect.left() + 5.0, item_rect.top() - height - 1.0)
         badge_rect.setVisible(True)
         badge_text.setVisible(True)
+
+    def _item_from_rectangle_annotation(
+        self,
+        annotation: dict[str, Any],
+        image_rect: QRectF,
+    ) -> QGraphicsRectItem | None:
+        rect = self._rect_from_annotation(annotation)
+        rect = rect.intersected(image_rect)
+        if rect.width() < RECT_MIN_SIZE or rect.height() < RECT_MIN_SIZE:
+            return None
+
+        return self._make_rect_item(rect)
+
+    def _item_from_polygon_annotation(self, annotation: dict[str, Any]) -> QGraphicsPolygonItem | None:
+        polygon = self._polygon_from_annotation(annotation)
+        if polygon is None:
+            return None
+
+        item = QGraphicsPolygonItem(polygon)
+        item.setZValue(10)
+        item.setPen(self._annotation_pen(selected=False))
+        item.setBrush(self._annotation_brush(selected=False))
+        item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        return item
+
+    def _polygon_from_annotation(self, annotation: dict[str, Any]) -> QPolygonF | None:
+        raw_points = annotation.get("points", [])
+        if not isinstance(raw_points, list) or len(raw_points) < 3:
+            return None
+
+        points: list[QPointF] = []
+        for point in raw_points:
+            if not isinstance(point, list) or len(point) < 2:
+                continue
+            try:
+                points.append(QPointF(float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                continue
+
+        if len(points) < 3:
+            return None
+
+        return QPolygonF(points)
+
+    def _item_bounds(self, item: AnnotationGraphicsItem) -> QRectF:
+        if isinstance(item, QGraphicsPolygonItem):
+            return item.polygon().boundingRect().normalized()
+
+        return item.rect().normalized()
 
     def _rect_from_annotation(self, annotation: dict[str, Any]) -> QRectF:
         if "bbox" in annotation and isinstance(annotation["bbox"], list) and len(annotation["bbox"]) == 4:
