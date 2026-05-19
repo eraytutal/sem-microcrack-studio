@@ -238,6 +238,12 @@ QToolButton:pressed {
     background: #102638;
 }
 
+QPushButton[emphasized="true"] {
+    background: #123044;
+    border-color: #1d6d89;
+    color: #e6fbff;
+}
+
 QPushButton:disabled {
     background: #162231;
     border-color: #33485d;

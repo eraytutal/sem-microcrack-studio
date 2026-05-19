@@ -480,7 +480,7 @@ class ImageViewer(QGraphicsView):
     def _normalize_annotation_properties(self, properties: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(DEFAULT_ANNOTATION_PROPERTIES)
         normalized.update({key: properties[key] for key in normalized if key in properties})
-        for key in ("id", "shape_type", "points", "bbox", "item_kind"):
+        for key in ("id", "prediction_id", "shape_type", "points", "bbox", "item_kind"):
             if key in properties:
                 normalized[key] = properties[key]
         normalized["label"] = str(normalized.get("label") or "crack")

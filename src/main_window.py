@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
         self.manual_image_status_by_image: dict[str, str] = {}
         self.manual_dirty_by_image: dict[str, bool] = {}
         self.predictions_by_image: dict[str, list[dict[str, object]]] = {}
+        self.review_dirty_by_image: dict[str, bool] = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -156,6 +157,8 @@ class MainWindow(QMainWindow):
         self.assisted_review_page.previous_image_requested.connect(self.load_previous_image)
         self.assisted_review_page.next_image_requested.connect(self.load_next_image)
         self.assisted_review_page.run_detection_requested.connect(self.run_dummy_detection)
+        self.assisted_review_page.save_review_requested.connect(self.save_current_review)
+        self.assisted_review_page.cancel_review_changes_requested.connect(self.cancel_current_review_changes)
         self.assisted_review_page.accept_prediction_requested.connect(self.accept_selected_prediction)
         self.assisted_review_page.reject_prediction_requested.connect(self.reject_selected_prediction)
         self.assisted_review_page.prediction_selected.connect(self.select_assisted_prediction)
@@ -291,11 +294,18 @@ class MainWindow(QMainWindow):
         if not self.current_image_path or not self.current_image_size:
             QMessageBox.warning(self, "No Image Loaded", "Open an image before running detection.")
             return
+        if self.has_unsaved_review_changes():
+            self._handle_unsaved_review_changes_before_leaving(
+                "You have unsaved prediction review changes.\nSave or cancel these changes before running detection again?"
+            )
+            return
 
         predictions = generate_dummy_polygon_predictions(self.current_image_path, self.current_image_size)
         self.predictions_by_image[self.current_image_path] = predictions
         save_predictions(self.current_image_path, self.current_image_size, predictions)
+        self.review_dirty_by_image[self.current_image_path] = False
         self._display_predictions(predictions)
+        self._update_review_save_state()
         filename = Path(self.current_image_path).name
         self.statusBar().showMessage(f"Generated dummy predictions for {filename}.", 4000)
 
@@ -312,33 +322,8 @@ class MainWindow(QMainWindow):
             )
             return
 
-        annotations, hidden_annotations, image_status = self._load_manual_state_from_json(self.current_image_path)
-        annotations.append(
-            prediction_to_annotation(
-                prediction,
-                self._next_annotation_id([*annotations, *hidden_annotations]),
-            )
-        )
-        all_annotations = [*annotations, *hidden_annotations]
-        save_annotation_json(
-            self.current_image_path,
-            self.current_image_size,
-            all_annotations,
-            self._annotation_metadata_for_current_image(),
-            "annotated",
-        )
-        self.manual_annotations_by_image[self.current_image_path] = annotations
-        self.manual_hidden_annotations_by_image[self.current_image_path] = hidden_annotations
-        self.manual_image_status_by_image[self.current_image_path] = "annotated"
-        self.manual_dirty_by_image[self.current_image_path] = False
-        self.manual_annotation_page.image_viewer.set_annotations(annotations)
-        self.manual_annotation_page.set_image_review_status("annotated")
-        self.manual_annotation_page.set_unsaved_changes(False)
-
         prediction["status"] = "accepted"
-        self._save_and_display_current_predictions()
-        self.refresh_dataset_page()
-        self.statusBar().showMessage("Prediction accepted and saved as annotation.", 4000)
+        self.mark_review_dirty("Prediction accepted. Unsaved review changes.")
 
     def reject_selected_prediction(self) -> None:
         prediction = self._selected_prediction()
@@ -346,11 +331,51 @@ class MainWindow(QMainWindow):
             return
 
         prediction["status"] = "rejected"
-        self._save_and_display_current_predictions()
-        self.statusBar().showMessage("Prediction rejected.", 4000)
+        self.mark_review_dirty("Prediction rejected. Unsaved review changes.")
 
     def select_assisted_prediction(self, prediction_id: str) -> None:
         self.assisted_review_page.image_viewer.select_annotation_by_data_id(prediction_id)
+
+    def save_current_review(self) -> bool:
+        if not self.current_image_path or not self.current_image_size:
+            QMessageBox.warning(self, "No Image Loaded", "Open an image before saving review decisions.")
+            return False
+
+        predictions = self.predictions_by_image.get(self.current_image_path, [])
+        if not predictions:
+            self._update_review_save_state()
+            return True
+
+        if self._current_manual_image_status() == "reviewed_no_defect" and any(
+            str(prediction.get("status") or "") == "accepted" for prediction in predictions
+        ):
+            QMessageBox.warning(
+                self,
+                "No Defect Mark Active",
+                "This image is marked as No Defect. Clear No Defect in Manual Annotation before accepting predictions.",
+            )
+            return False
+
+        save_predictions(self.current_image_path, self.current_image_size, predictions)
+        self._append_accepted_predictions_to_annotations(predictions)
+        self.review_dirty_by_image[self.current_image_path] = False
+        self._display_predictions(predictions)
+        self._update_review_save_state()
+        self.refresh_dataset_page()
+        filename = Path(self.current_image_path).name
+        self.statusBar().showMessage(f"Saved review decisions for {filename}.", 4000)
+        return True
+
+    def cancel_current_review_changes(self) -> None:
+        if not self.current_image_path:
+            return
+
+        predictions = load_predictions(self.current_image_path)
+        self.predictions_by_image[self.current_image_path] = predictions
+        self.review_dirty_by_image[self.current_image_path] = False
+        self._display_predictions(predictions)
+        self.assisted_review_page.image_viewer.clear_selection()
+        self._update_review_save_state()
 
     def save_current_image_annotations(self) -> bool:
         if not self.current_image_path or not self.current_image_size:
@@ -431,6 +456,19 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.set_unsaved_changes(True)
         self.statusBar().showMessage(message, 4000)
 
+    def mark_review_dirty(self, message: str = "Unsaved review changes.") -> None:
+        if not self.current_image_path:
+            return
+
+        self.review_dirty_by_image[self.current_image_path] = True
+        selected_id = self.assisted_review_page.selected_prediction_id()
+        self._display_predictions(self.predictions_by_image.get(self.current_image_path, []))
+        if selected_id:
+            self.assisted_review_page.select_prediction(selected_id)
+            self.assisted_review_page.image_viewer.select_annotation_by_data_id(selected_id)
+        self._update_review_save_state()
+        self.statusBar().showMessage(message, 4000)
+
     def clear_current_image_dirty(self) -> None:
         if not self.current_image_path:
             return
@@ -440,6 +478,9 @@ class MainWindow(QMainWindow):
 
     def has_unsaved_changes(self) -> bool:
         return bool(self.current_image_path and self.manual_dirty_by_image.get(self.current_image_path, False))
+
+    def has_unsaved_review_changes(self) -> bool:
+        return bool(self.current_image_path and self.review_dirty_by_image.get(self.current_image_path, False))
 
     def closeEvent(self, event) -> None:
         if self._confirm_close_with_unsaved_changes():
@@ -483,6 +524,12 @@ class MainWindow(QMainWindow):
         return self._prepare_for_leaving_current_image()
 
     def _prepare_for_leaving_current_image(self) -> bool:
+        if self.has_unsaved_review_changes():
+            self._handle_unsaved_review_changes_before_leaving(
+                "You have unsaved prediction review changes.\nSave or cancel these changes before leaving?"
+            )
+            return False
+
         if self.manual_annotation_page.image_viewer.has_pending_annotation():
             QMessageBox.warning(
                 self,
@@ -505,6 +552,18 @@ class MainWindow(QMainWindow):
         return False
 
     def _confirm_close_with_unsaved_changes(self) -> bool:
+        if self.has_unsaved_review_changes():
+            choice = self._ask_save_or_cancel_changes(
+                "Unsaved Review Changes",
+                "You have unsaved prediction review changes.\nSave or cancel these changes before closing?",
+            )
+            if choice == "save":
+                return self.save_current_review()
+            if choice == "cancel_changes":
+                self.cancel_current_review_changes()
+                return True
+            return False
+
         if self.manual_annotation_page.image_viewer.has_pending_annotation():
             QMessageBox.warning(
                 self,
@@ -543,6 +602,13 @@ class MainWindow(QMainWindow):
         if clicked is cancel_changes_button:
             return "cancel_changes"
         return "cancel_changes"
+
+    def _handle_unsaved_review_changes_before_leaving(self, message: str) -> None:
+        choice = self._ask_save_or_cancel_changes("Unsaved Review Changes", message)
+        if choice == "save":
+            self.save_current_review()
+        elif choice == "cancel_changes":
+            self.cancel_current_review_changes()
 
     def discard_current_image_unsaved_changes(self) -> None:
         if not self.current_image_path:
@@ -600,10 +666,10 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.set_unsaved_changes(self.manual_dirty_by_image.get(image_path, False))
 
     def _restore_predictions(self, image_path: str) -> None:
-        if image_path not in self.predictions_by_image:
-            self.predictions_by_image[image_path] = load_predictions(image_path)
-
+        self.predictions_by_image[image_path] = load_predictions(image_path)
+        self.review_dirty_by_image[image_path] = False
         self._display_predictions(self.predictions_by_image[image_path])
+        self._update_review_save_state()
 
     def _display_predictions(self, predictions: list[dict[str, object]]) -> None:
         self.assisted_review_page.image_viewer.set_prediction_overlays(predictions)
@@ -633,6 +699,75 @@ class MainWindow(QMainWindow):
         if selected_id:
             self.assisted_review_page.select_prediction(selected_id)
             self.assisted_review_page.image_viewer.select_annotation_by_data_id(selected_id)
+
+    def _update_review_save_state(self) -> None:
+        if not self.current_image_path or not self.predictions_by_image.get(self.current_image_path):
+            self.assisted_review_page.set_review_save_state("none")
+        elif self.review_dirty_by_image.get(self.current_image_path, False):
+            self.assisted_review_page.set_review_save_state("unsaved")
+        else:
+            self.assisted_review_page.set_review_save_state("saved")
+
+    def _append_accepted_predictions_to_annotations(self, predictions: list[dict[str, object]]) -> None:
+        if not self.current_image_path or not self.current_image_size:
+            return
+
+        existing_data = load_annotation_json(self.current_image_path) or {}
+        raw_annotations = existing_data.get("annotations", [])
+        if not isinstance(raw_annotations, list):
+            raw_annotations = []
+
+        annotations: list[dict[str, object]] = [
+            dict(annotation) for annotation in raw_annotations if isinstance(annotation, dict)
+        ]
+        prediction_id_index: dict[str, dict[str, object]] = {}
+        annotation_id_index: dict[str, dict[str, object]] = {}
+        for annotation in annotations:
+            prediction_id = str(annotation.get("prediction_id") or "")
+            annotation_id = str(annotation.get("id") or "")
+            if prediction_id:
+                prediction_id_index[prediction_id] = annotation
+            if annotation_id:
+                annotation_id_index[annotation_id] = annotation
+
+        image_stem = Path(self.current_image_path).stem
+        changed = False
+        for prediction in predictions:
+            if str(prediction.get("status") or "") != "accepted":
+                continue
+
+            prediction_id = str(prediction.get("id") or "")
+            annotation_id = f"ann_from_{image_stem}_{prediction_id}"
+            annotation = prediction_to_annotation(prediction, annotation_id)
+            existing = prediction_id_index.get(prediction_id) or annotation_id_index.get(annotation_id)
+            if existing is not None:
+                existing.update(annotation)
+            else:
+                annotations.append(annotation)
+                prediction_id_index[prediction_id] = annotation
+                annotation_id_index[annotation_id] = annotation
+            changed = True
+
+        if not changed:
+            return
+
+        save_annotation_json(
+            self.current_image_path,
+            self.current_image_size,
+            annotations,
+            self._annotation_metadata_for_current_image(),
+            "annotated",
+        )
+        display_annotations, hidden_annotations, image_status = self._load_manual_state_from_json(
+            self.current_image_path
+        )
+        self.manual_annotations_by_image[self.current_image_path] = display_annotations
+        self.manual_hidden_annotations_by_image[self.current_image_path] = hidden_annotations
+        self.manual_image_status_by_image[self.current_image_path] = "annotated"
+        self.manual_dirty_by_image[self.current_image_path] = False
+        self.manual_annotation_page.image_viewer.set_annotations(display_annotations)
+        self.manual_annotation_page.set_image_review_status("annotated")
+        self.manual_annotation_page.set_unsaved_changes(False)
 
     def _next_annotation_id(self, annotations: list[dict[str, object]]) -> str:
         max_index = 0

@@ -48,6 +48,8 @@ def normalize_annotation(annotation: dict[str, Any], fallback_id: str | None = N
             "notes": str(annotation.get("notes") or ""),
         }
     )
+    if annotation.get("prediction_id"):
+        normalized["prediction_id"] = str(annotation.get("prediction_id"))
 
     if normalized["shape_type"] == "polygon":
         points = _normalize_points(annotation.get("points", []))

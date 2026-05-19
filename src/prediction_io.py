@@ -112,6 +112,7 @@ def prediction_to_annotation(prediction: dict[str, Any], annotation_id: str) -> 
     normalized = _normalize_prediction(prediction, fallback_id=annotation_id)
     return {
         "id": annotation_id,
+        "prediction_id": str(normalized.get("id") or ""),
         "label": str(normalized.get("label") or "crack"),
         "shape_type": "polygon",
         "points": normalized.get("points", []),

@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -25,6 +24,8 @@ class AssistedReviewPage(QWidget):
     previous_image_requested = Signal()
     next_image_requested = Signal()
     run_detection_requested = Signal()
+    save_review_requested = Signal()
+    cancel_review_changes_requested = Signal()
     accept_prediction_requested = Signal()
     reject_prediction_requested = Signal()
     prediction_selected = Signal(str)
@@ -55,7 +56,6 @@ class AssistedReviewPage(QWidget):
             ("Open Image", "open_image"),
             ("Open Folder", "open_folder"),
             ("Run Detection", "detect"),
-            ("Save Review", "save"),
         ]
         for text, icon_name in actions:
             button = QPushButton(text)
@@ -121,6 +121,7 @@ class AssistedReviewPage(QWidget):
         self.empty_suggestions_label.setWordWrap(True)
         layout.addWidget(self.suggestion_list)
         layout.addWidget(self.empty_suggestions_label)
+        layout.addWidget(self._build_save_state_card())
 
         layout.addStretch(1)
 
@@ -130,15 +131,39 @@ class AssistedReviewPage(QWidget):
         self.reject_button = QPushButton("Reject")
         self.reject_button.setIcon(icon("reject"))
         self.reject_button.clicked.connect(self.reject_prediction_requested.emit)
-        self.edit_button = QPushButton("Edit in Annotation")
-        self.edit_button.setIcon(icon("edit"))
-        self.edit_button.clicked.connect(self._show_edit_placeholder)
+        self.cancel_changes_button = QPushButton("Cancel Changes")
+        self.cancel_changes_button.setIcon(icon("reject"))
+        self.cancel_changes_button.clicked.connect(self.cancel_review_changes_requested.emit)
+        self.save_review_button = QPushButton("Save Review")
+        self.save_review_button.setIcon(icon("save", active=True))
+        self.save_review_button.clicked.connect(self.save_review_requested.emit)
 
         layout.addWidget(self.accept_button)
         layout.addWidget(self.reject_button)
-        layout.addWidget(self.edit_button)
+        layout.addWidget(self.cancel_changes_button)
+        layout.addWidget(self.save_review_button)
         self.set_predictions([])
+        self.set_review_save_state("none")
         return panel
+
+    def _build_save_state_card(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("saveStateCard")
+        card.setProperty("saveState", "saved")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+
+        self.review_save_title = QLabel("No predictions loaded")
+        self.review_save_title.setObjectName("saveStateTitle")
+        self.review_save_helper = QLabel("")
+        self.review_save_helper.setObjectName("saveStateHelper")
+        self.review_save_helper.setWordWrap(True)
+
+        layout.addWidget(self.review_save_title)
+        layout.addWidget(self.review_save_helper)
+        self.review_save_state_card = card
+        return card
 
     def set_navigation_state(
         self,
@@ -176,6 +201,31 @@ class AssistedReviewPage(QWidget):
         self.suggestion_list.blockSignals(False)
         self._update_action_state()
 
+    def set_review_save_state(self, state: str) -> None:
+        if state == "unsaved":
+            title = "Unsaved review changes"
+            helper = "Click Save Review to persist decisions."
+            property_value = "unsaved"
+        elif state == "saved":
+            title = "All review changes saved"
+            helper = ""
+            property_value = "saved"
+        else:
+            title = "No predictions loaded"
+            helper = ""
+            property_value = "saved"
+
+        self.review_save_title.setText(title)
+        self.review_save_helper.setText(helper)
+        self.review_save_state_card.setProperty("saveState", property_value)
+        self.review_save_state_card.style().unpolish(self.review_save_state_card)
+        self.review_save_state_card.style().polish(self.review_save_state_card)
+        self.cancel_changes_button.setVisible(state == "unsaved")
+        self.save_review_button.setEnabled(state != "none")
+        self.save_review_button.setProperty("emphasized", state == "unsaved")
+        self.save_review_button.style().unpolish(self.save_review_button)
+        self.save_review_button.style().polish(self.save_review_button)
+
     def selected_prediction_id(self) -> str:
         item = self.suggestion_list.currentItem()
         return str(item.data(Qt.UserRole) or "") if item else ""
@@ -211,11 +261,3 @@ class AssistedReviewPage(QWidget):
         is_pending = has_selection and str(item.data(Qt.UserRole + 1) or "pending") == "pending"
         self.accept_button.setEnabled(is_pending)
         self.reject_button.setEnabled(is_pending)
-        self.edit_button.setEnabled(has_selection)
-
-    def _show_edit_placeholder(self) -> None:
-        QMessageBox.information(
-            self,
-            "Edit in Annotation",
-            "Edit in Annotation will be added later.",
-        )
