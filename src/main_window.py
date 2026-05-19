@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.annotation_io import get_dataset_status, load_annotation_json, save_annotation_json
+from src.annotation_model import is_rectangle_annotation, normalize_annotation
 from src.icons import icon
 from src.pages.assisted_review_page import AssistedReviewPage
 from src.pages.dataset_export_page import DatasetExportPage
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self.current_image_path: str | None = None
         self.current_image_size: tuple[int, int] | None = None
         self.manual_annotations_by_image: dict[str, list[dict[str, object]]] = {}
+        self.manual_hidden_annotations_by_image: dict[str, list[dict[str, object]]] = {}
         self.manual_image_status_by_image: dict[str, str] = {}
         self.manual_dirty_by_image: dict[str, bool] = {}
 
@@ -287,13 +289,15 @@ class MainWindow(QMainWindow):
             return False
 
         rects = self.manual_annotation_page.image_viewer.get_rect_annotations()
+        hidden_annotations = self.manual_hidden_annotations_by_image.get(self.current_image_path, [])
+        annotations = [*rects, *hidden_annotations]
         image_status = self._current_manual_image_status()
         self.manual_annotations_by_image[self.current_image_path] = rects
         self.manual_image_status_by_image[self.current_image_path] = image_status
         annotation_path = save_annotation_json(
             self.current_image_path,
             self.current_image_size,
-            rects,
+            annotations,
             self.manual_annotation_page.annotation_save_context(),
             image_status,
         )
@@ -317,7 +321,8 @@ class MainWindow(QMainWindow):
             )
             return
 
-        if viewer.confirmed_annotation_count() > 0:
+        hidden_annotations = self.manual_hidden_annotations_by_image.get(self.current_image_path, [])
+        if viewer.confirmed_annotation_count() > 0 or hidden_annotations:
             QMessageBox.warning(
                 self,
                 "Annotations Present",
@@ -327,6 +332,7 @@ class MainWindow(QMainWindow):
 
         viewer.clear_annotations()
         self.manual_annotations_by_image[self.current_image_path] = []
+        self.manual_hidden_annotations_by_image[self.current_image_path] = []
         self.manual_image_status_by_image[self.current_image_path] = "reviewed_no_defect"
         self.manual_annotation_page.set_image_review_status("reviewed_no_defect")
         self.mark_current_image_dirty("No Defect status changed. Unsaved changes.")
@@ -465,8 +471,9 @@ class MainWindow(QMainWindow):
         if not self.current_image_path:
             return
 
-        rects, image_status = self._load_manual_state_from_json(self.current_image_path)
+        rects, hidden_annotations, image_status = self._load_manual_state_from_json(self.current_image_path)
         self.manual_annotations_by_image[self.current_image_path] = rects
+        self.manual_hidden_annotations_by_image[self.current_image_path] = hidden_annotations
         self.manual_image_status_by_image[self.current_image_path] = image_status
         self.manual_dirty_by_image[self.current_image_path] = False
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
@@ -500,33 +507,45 @@ class MainWindow(QMainWindow):
     def _restore_manual_annotations(self, image_path: str) -> None:
         if image_path in self.manual_annotations_by_image:
             rects = self.manual_annotations_by_image[image_path]
+            hidden_annotations = self.manual_hidden_annotations_by_image.get(image_path, [])
             image_status = self.manual_image_status_by_image.get(
                 image_path,
-                "annotated" if rects else "unreviewed",
+                "annotated" if rects or hidden_annotations else "unreviewed",
             )
         else:
-            rects, image_status = self._load_manual_state_from_json(image_path)
+            rects, hidden_annotations, image_status = self._load_manual_state_from_json(image_path)
             self.manual_annotations_by_image[image_path] = rects
+            self.manual_hidden_annotations_by_image[image_path] = hidden_annotations
             self.manual_image_status_by_image[image_path] = image_status
 
         self.manual_annotation_page.image_viewer.set_rect_annotations(rects)
         self.manual_annotation_page.set_image_review_status(image_status)
         self.manual_annotation_page.set_unsaved_changes(self.manual_dirty_by_image.get(image_path, False))
 
-    def _load_manual_state_from_json(self, image_path: str) -> tuple[list[dict[str, object]], str]:
+    def _load_manual_state_from_json(
+        self,
+        image_path: str,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]], str]:
         data = load_annotation_json(image_path)
         if not data:
-            return [], "unreviewed"
+            return [], [], "unreviewed"
 
         rects: list[dict[str, object]] = []
-        for annotation in data.get("annotations", []):
-            if annotation.get("shape_type") != "rectangle":
+        hidden_annotations: list[dict[str, object]] = []
+        raw_annotations = data.get("annotations", [])
+        if not isinstance(raw_annotations, list):
+            raw_annotations = []
+
+        for index, raw_annotation in enumerate(raw_annotations, start=1):
+            if not isinstance(raw_annotation, dict):
+                continue
+
+            annotation = normalize_annotation(raw_annotation, fallback_id=f"ann_{index:03d}")
+            if not is_rectangle_annotation(annotation):
+                hidden_annotations.append(annotation)
                 continue
 
             bbox = annotation.get("bbox", [])
-            if len(bbox) != 4:
-                continue
-
             x, y, width, height = bbox
             rects.append(
                 {
@@ -535,6 +554,7 @@ class MainWindow(QMainWindow):
                     "width": float(width),
                     "height": float(height),
                     "label": str(annotation.get("label") or "crack"),
+                    "shape_type": "rectangle",
                     "source": str(annotation.get("source") or "manual"),
                     "confidence": annotation.get("confidence"),
                     "exportable_to_mask": bool(annotation.get("exportable_to_mask", True)),
@@ -547,18 +567,22 @@ class MainWindow(QMainWindow):
         if raw_status in {"unreviewed", "annotated", "reviewed_no_defect"}:
             image_status = raw_status
         else:
-            image_status = "annotated" if rects else "unreviewed"
+            image_status = "annotated" if rects or hidden_annotations else "unreviewed"
 
-        if rects:
+        if rects or hidden_annotations:
             image_status = "annotated"
         elif image_status != "reviewed_no_defect":
             image_status = "unreviewed"
 
-        return rects, image_status
+        return rects, hidden_annotations, image_status
 
     def _current_manual_image_status(self) -> str:
         viewer = self.manual_annotation_page.image_viewer
-        if viewer.confirmed_annotation_count() > 0:
+        has_hidden_annotations = bool(
+            self.current_image_path
+            and self.manual_hidden_annotations_by_image.get(self.current_image_path, [])
+        )
+        if viewer.confirmed_annotation_count() > 0 or has_hidden_annotations:
             return "annotated"
         if self.manual_annotation_page.image_review_status() == "reviewed_no_defect":
             return "reviewed_no_defect"

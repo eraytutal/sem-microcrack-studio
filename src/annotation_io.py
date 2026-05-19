@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.annotation_model import normalize_annotation
+
 
 ANNOTATIONS_DIR = Path(__file__).resolve().parent.parent / "data" / "annotations"
 
@@ -34,8 +36,9 @@ def get_image_annotation_status(image_path: str) -> dict[str, Any]:
             "annotation_count": 0,
         }
 
-    annotations = data.get("annotations", [])
-    annotation_count = len(annotations) if isinstance(annotations, list) else 0
+    raw_annotations = data.get("annotations", [])
+    annotations = _normalized_annotations(raw_annotations)
+    annotation_count = len(annotations)
     image_status = data.get("image_status")
 
     if image_status == "annotated":
@@ -100,10 +103,7 @@ def save_annotation_json(
             "image_quality": str(metadata.get("image_quality", "")),
             "notes": str(metadata.get("notes", "")),
         },
-        "annotations": [
-            _annotation_payload(index, rect)
-            for index, rect in enumerate(annotations, start=1)
-        ],
+        "annotations": _annotation_payloads(annotations),
     }
 
     annotation_path = get_annotation_path(image_path)
@@ -122,23 +122,19 @@ def _normalize_image_status(image_status: str, annotations: list[dict[str, Any]]
     return "unreviewed"
 
 
-def _annotation_payload(
-    index: int,
-    rect: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "id": f"ann_{index:03d}",
-        "label": str(rect.get("label") or "crack"),
-        "shape_type": "rectangle",
-        "bbox": [
-            float(rect.get("x", 0.0)),
-            float(rect.get("y", 0.0)),
-            float(rect.get("width", 0.0)),
-            float(rect.get("height", 0.0)),
-        ],
-        "source": str(rect.get("source") or "manual"),
-        "confidence": rect.get("confidence"),
-        "exportable_to_mask": bool(rect.get("exportable_to_mask", True)),
-        "status": str(rect.get("status") or "verified"),
-        "notes": str(rect.get("notes") or ""),
-    }
+def _annotation_payloads(annotations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        normalize_annotation(annotation, fallback_id=f"ann_{index:03d}")
+        for index, annotation in enumerate(annotations, start=1)
+    ]
+
+
+def _normalized_annotations(raw_annotations: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_annotations, list):
+        return []
+
+    return [
+        normalize_annotation(annotation, fallback_id=f"ann_{index:03d}")
+        for index, annotation in enumerate(raw_annotations, start=1)
+        if isinstance(annotation, dict)
+    ]

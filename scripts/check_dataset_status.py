@@ -15,6 +15,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.annotation_io import get_dataset_status  # noqa: E402
 
 
+def configure_output_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def collect_image_paths(folder_path: Path) -> list[str]:
     return [
         str(path)
@@ -55,6 +62,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_output_encoding()
     args = parse_args()
     folder_path = Path(args.image_folder).expanduser()
 

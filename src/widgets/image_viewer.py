@@ -389,6 +389,7 @@ class ImageViewer(QGraphicsView):
             "width": rect.width(),
             "height": rect.height(),
             "annotation_item_id": self._annotation_item_id(item),
+            "shape_type": "rectangle",
             **self._item_properties(item),
         }
 
