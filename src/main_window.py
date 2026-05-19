@@ -23,6 +23,12 @@ from src.icons import icon
 from src.pages.assisted_review_page import AssistedReviewPage
 from src.pages.dataset_export_page import DatasetExportPage
 from src.pages.manual_annotation_page import ManualAnnotationPage
+from src.prediction_io import (
+    generate_dummy_polygon_predictions,
+    load_predictions,
+    prediction_to_annotation,
+    save_predictions,
+)
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
@@ -50,6 +56,7 @@ class MainWindow(QMainWindow):
         self.manual_hidden_annotations_by_image: dict[str, list[dict[str, object]]] = {}
         self.manual_image_status_by_image: dict[str, str] = {}
         self.manual_dirty_by_image: dict[str, bool] = {}
+        self.predictions_by_image: dict[str, list[dict[str, object]]] = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -148,6 +155,10 @@ class MainWindow(QMainWindow):
         self.assisted_review_page.open_folder_requested.connect(self.open_image_folder)
         self.assisted_review_page.previous_image_requested.connect(self.load_previous_image)
         self.assisted_review_page.next_image_requested.connect(self.load_next_image)
+        self.assisted_review_page.run_detection_requested.connect(self.run_dummy_detection)
+        self.assisted_review_page.accept_prediction_requested.connect(self.accept_selected_prediction)
+        self.assisted_review_page.reject_prediction_requested.connect(self.reject_selected_prediction)
+        self.assisted_review_page.prediction_selected.connect(self.select_assisted_prediction)
         self.manual_annotation_page.previous_image_requested.connect(self.load_previous_image)
         self.manual_annotation_page.next_image_requested.connect(self.load_next_image)
         self.manual_annotation_page.save_annotation_requested.connect(self.save_current_annotation_json)
@@ -229,6 +240,7 @@ class MainWindow(QMainWindow):
         self.current_image_path = image_path
         self.current_image_size = (image_size.width(), image_size.height())
         self._restore_manual_annotations(image_path)
+        self._restore_predictions(image_path)
         if image_path in self.image_paths:
             self.current_image_index = self.image_paths.index(image_path)
         self.update_navigation_state()
@@ -274,6 +286,71 @@ class MainWindow(QMainWindow):
 
     def save_current_annotation_json(self) -> None:
         self.save_current_image_annotations()
+
+    def run_dummy_detection(self) -> None:
+        if not self.current_image_path or not self.current_image_size:
+            QMessageBox.warning(self, "No Image Loaded", "Open an image before running detection.")
+            return
+
+        predictions = generate_dummy_polygon_predictions(self.current_image_path, self.current_image_size)
+        self.predictions_by_image[self.current_image_path] = predictions
+        save_predictions(self.current_image_path, self.current_image_size, predictions)
+        self._display_predictions(predictions)
+        filename = Path(self.current_image_path).name
+        self.statusBar().showMessage(f"Generated dummy predictions for {filename}.", 4000)
+
+    def accept_selected_prediction(self) -> None:
+        prediction = self._selected_prediction()
+        if prediction is None or str(prediction.get("status") or "pending") != "pending":
+            return
+
+        if self._current_manual_image_status() == "reviewed_no_defect":
+            QMessageBox.warning(
+                self,
+                "No Defect Mark Active",
+                "This image is marked as No Defect. Clear No Defect in Manual Annotation before accepting predictions.",
+            )
+            return
+
+        annotations, hidden_annotations, image_status = self._load_manual_state_from_json(self.current_image_path)
+        annotations.append(
+            prediction_to_annotation(
+                prediction,
+                self._next_annotation_id([*annotations, *hidden_annotations]),
+            )
+        )
+        all_annotations = [*annotations, *hidden_annotations]
+        save_annotation_json(
+            self.current_image_path,
+            self.current_image_size,
+            all_annotations,
+            self._annotation_metadata_for_current_image(),
+            "annotated",
+        )
+        self.manual_annotations_by_image[self.current_image_path] = annotations
+        self.manual_hidden_annotations_by_image[self.current_image_path] = hidden_annotations
+        self.manual_image_status_by_image[self.current_image_path] = "annotated"
+        self.manual_dirty_by_image[self.current_image_path] = False
+        self.manual_annotation_page.image_viewer.set_annotations(annotations)
+        self.manual_annotation_page.set_image_review_status("annotated")
+        self.manual_annotation_page.set_unsaved_changes(False)
+
+        prediction["status"] = "accepted"
+        self._save_and_display_current_predictions()
+        self.refresh_dataset_page()
+        self.statusBar().showMessage("Prediction accepted and saved as annotation.", 4000)
+
+    def reject_selected_prediction(self) -> None:
+        prediction = self._selected_prediction()
+        if prediction is None or str(prediction.get("status") or "pending") != "pending":
+            return
+
+        prediction["status"] = "rejected"
+        self._save_and_display_current_predictions()
+        self.statusBar().showMessage("Prediction rejected.", 4000)
+
+    def select_assisted_prediction(self, prediction_id: str) -> None:
+        self.assisted_review_page.image_viewer.select_annotation_by_data_id(prediction_id)
 
     def save_current_image_annotations(self) -> bool:
         if not self.current_image_path or not self.current_image_size:
@@ -521,6 +598,61 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.image_viewer.set_annotations(annotations)
         self.manual_annotation_page.set_image_review_status(image_status)
         self.manual_annotation_page.set_unsaved_changes(self.manual_dirty_by_image.get(image_path, False))
+
+    def _restore_predictions(self, image_path: str) -> None:
+        if image_path not in self.predictions_by_image:
+            self.predictions_by_image[image_path] = load_predictions(image_path)
+
+        self._display_predictions(self.predictions_by_image[image_path])
+
+    def _display_predictions(self, predictions: list[dict[str, object]]) -> None:
+        self.assisted_review_page.image_viewer.set_prediction_overlays(predictions)
+        self.assisted_review_page.set_predictions(predictions)
+
+    def _selected_prediction(self) -> dict[str, object] | None:
+        if not self.current_image_path:
+            return None
+
+        prediction_id = self.assisted_review_page.selected_prediction_id()
+        if not prediction_id:
+            return None
+
+        for prediction in self.predictions_by_image.get(self.current_image_path, []):
+            if str(prediction.get("id") or "") == prediction_id:
+                return prediction
+        return None
+
+    def _save_and_display_current_predictions(self) -> None:
+        if not self.current_image_path or not self.current_image_size:
+            return
+
+        predictions = self.predictions_by_image.get(self.current_image_path, [])
+        selected_id = self.assisted_review_page.selected_prediction_id()
+        save_predictions(self.current_image_path, self.current_image_size, predictions)
+        self._display_predictions(predictions)
+        if selected_id:
+            self.assisted_review_page.select_prediction(selected_id)
+            self.assisted_review_page.image_viewer.select_annotation_by_data_id(selected_id)
+
+    def _next_annotation_id(self, annotations: list[dict[str, object]]) -> str:
+        max_index = 0
+        for annotation in annotations:
+            raw_id = str(annotation.get("id") or "")
+            if raw_id.startswith("ann_"):
+                try:
+                    max_index = max(max_index, int(raw_id.removeprefix("ann_")))
+                except ValueError:
+                    continue
+        return f"ann_{max_index + 1:03d}"
+
+    def _annotation_metadata_for_current_image(self) -> dict[str, object]:
+        if not self.current_image_path:
+            return {}
+
+        data = load_annotation_json(self.current_image_path)
+        if isinstance(data, dict) and isinstance(data.get("metadata"), dict):
+            return data["metadata"]
+        return self.manual_annotation_page.annotation_save_context()
 
     def _load_manual_state_from_json(
         self,

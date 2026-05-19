@@ -166,6 +166,16 @@ class ImageViewer(QGraphicsView):
 
         return False
 
+    def select_annotation_by_data_id(self, data_id: str) -> bool:
+        for item in self._annotations:
+            if str(self._item_properties(item).get("id") or "") == data_id:
+                self._scene.clearSelection()
+                item.setSelected(True)
+                self.centerOn(item)
+                return True
+
+        return False
+
     def set_default_annotation_properties(self, properties: dict[str, Any]) -> None:
         self._default_annotation_properties.update(self._normalize_annotation_properties(properties))
 
@@ -255,6 +265,37 @@ class ImageViewer(QGraphicsView):
 
     def set_rect_annotations(self, rects: list[dict[str, Any]]) -> None:
         self.set_annotations(rects)
+
+    def set_prediction_overlays(self, predictions: list[dict[str, Any]]) -> None:
+        self.clear_annotations()
+        if not self.has_image():
+            return
+
+        for prediction_data in predictions:
+            annotation = normalize_annotation(prediction_data)
+            if not is_polygon_annotation(annotation):
+                continue
+
+            item = self._item_from_polygon_annotation(annotation)
+            if item is None:
+                continue
+
+            item.setData(
+                ANNOTATION_DATA_ROLE,
+                self._normalize_annotation_properties(
+                    {
+                        **annotation,
+                        "id": prediction_data.get("id", annotation.get("id", "")),
+                        "item_kind": "prediction",
+                        "status": str(prediction_data.get("status") or "pending"),
+                    }
+                ),
+            )
+            self._scene.addItem(item)
+            self._annotations.append(item)
+            self._update_badge(item)
+        self._update_annotation_styles()
+        self.selected_annotation_changed.emit(None)
 
     def mousePressEvent(self, event) -> None:
         if (
@@ -439,7 +480,7 @@ class ImageViewer(QGraphicsView):
     def _normalize_annotation_properties(self, properties: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(DEFAULT_ANNOTATION_PROPERTIES)
         normalized.update({key: properties[key] for key in normalized if key in properties})
-        for key in ("id", "shape_type", "points", "bbox"):
+        for key in ("id", "shape_type", "points", "bbox", "item_kind"):
             if key in properties:
                 normalized[key] = properties[key]
         normalized["label"] = str(normalized.get("label") or "crack")
@@ -458,7 +499,24 @@ class ImageViewer(QGraphicsView):
     def _is_confirmed(self, item: AnnotationGraphicsItem) -> bool:
         return not self._is_pending(item)
 
+    def _is_prediction(self, item: AnnotationGraphicsItem) -> bool:
+        return self._item_properties(item).get("item_kind") == "prediction"
+
     def _annotation_pen_for_item(self, item: AnnotationGraphicsItem, selected: bool) -> QPen:
+        if self._is_prediction(item):
+            status = str(self._item_properties(item).get("status") or "pending")
+            color = {
+                "accepted": QColor("#22c55e"),
+                "rejected": QColor("#64748b"),
+            }.get(status, QColor("#a78bfa"))
+            if selected:
+                color = QColor("#facc15")
+            pen = QPen(color, 2.1 if selected else 1.7)
+            pen.setCosmetic(True)
+            if status == "rejected":
+                pen.setStyle(Qt.DotLine)
+            return pen
+
         if self._is_pending(item):
             pen = QPen(QColor("#f59e0b"), 2.0)
             pen.setStyle(Qt.DashLine)
@@ -468,6 +526,16 @@ class ImageViewer(QGraphicsView):
         return self._annotation_pen(selected=selected)
 
     def _annotation_brush_for_item(self, item: AnnotationGraphicsItem, selected: bool) -> QBrush:
+        if self._is_prediction(item):
+            status = str(self._item_properties(item).get("status") or "pending")
+            if status == "accepted":
+                return QBrush(QColor(34, 197, 94, 42))
+            if status == "rejected":
+                return QBrush(QColor(100, 116, 139, 28))
+            if selected:
+                return QBrush(QColor(250, 204, 21, 46))
+            return QBrush(QColor(167, 139, 250, 42))
+
         if self._is_pending(item):
             return QBrush(QColor(245, 158, 11, 50))
 
@@ -477,7 +545,7 @@ class ImageViewer(QGraphicsView):
         badge_rect = getattr(item, "_label_badge_rect", None)
         badge_text = getattr(item, "_label_badge_text", None)
 
-        if self._is_pending(item):
+        if self._is_pending(item) and not self._is_prediction(item):
             if badge_rect:
                 badge_rect.setVisible(False)
             if badge_text:
@@ -501,7 +569,12 @@ class ImageViewer(QGraphicsView):
             badge_text.setFont(font)
             setattr(item, "_label_badge_text", badge_text)
 
-        label = str(self._item_properties(item).get("label") or "crack")
+        properties = self._item_properties(item)
+        label = str(properties.get("label") or "crack")
+        if self._is_prediction(item):
+            confidence = properties.get("confidence")
+            if confidence is not None:
+                label = f"{label} {float(confidence):.2f}"
         badge_text.setPlainText(label)
         text_rect = badge_text.boundingRect()
         width = max(34.0, text_rect.width() + 10.0)

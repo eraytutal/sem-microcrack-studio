@@ -5,6 +5,9 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -21,6 +24,10 @@ class AssistedReviewPage(QWidget):
     open_folder_requested = Signal()
     previous_image_requested = Signal()
     next_image_requested = Signal()
+    run_detection_requested = Signal()
+    accept_prediction_requested = Signal()
+    reject_prediction_requested = Signal()
+    prediction_selected = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -57,6 +64,8 @@ class AssistedReviewPage(QWidget):
                 button.clicked.connect(self.open_image_requested.emit)
             elif text == "Open Folder":
                 button.clicked.connect(self.open_folder_requested.emit)
+            elif text == "Run Detection":
+                button.clicked.connect(self.run_detection_requested.emit)
             layout.addWidget(button)
 
         layout.addStretch(1)
@@ -83,6 +92,7 @@ class AssistedReviewPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         self.image_viewer = ImageViewer("Load an SEM image to start assisted review")
+        self.image_viewer.selected_annotation_changed.connect(self._handle_overlay_selection_changed)
         self.navigation_bar = ImageNavigationBar()
         self.navigation_bar.previous_requested.connect(self.previous_image_requested.emit)
         self.navigation_bar.next_requested.connect(self.next_image_requested.emit)
@@ -102,26 +112,32 @@ class AssistedReviewPage(QWidget):
         title.setObjectName("panelTitle")
         layout.addWidget(title)
 
-        predictions = [
-            ("Possible crack", "0.82", "pending"),
-            ("Possible scratch", "0.61", "pending"),
-            ("Uncertain region", "0.44", "pending"),
-        ]
-        for name, confidence, state in predictions:
-            layout.addWidget(self._prediction_row(name, confidence, state))
+        self.suggestion_list = QListWidget()
+        self.suggestion_list.setObjectName("annotationList")
+        self.suggestion_list.currentItemChanged.connect(self._handle_suggestion_selection)
+        self.empty_suggestions_label = QLabel("No model suggestions.")
+        self.empty_suggestions_label.setObjectName("mutedText")
+        self.empty_suggestions_label.setAlignment(Qt.AlignCenter)
+        self.empty_suggestions_label.setWordWrap(True)
+        layout.addWidget(self.suggestion_list)
+        layout.addWidget(self.empty_suggestions_label)
 
         layout.addStretch(1)
 
-        accept = QPushButton("Accept")
-        accept.setIcon(icon("accept", active=True))
-        reject = QPushButton("Reject")
-        reject.setIcon(icon("reject"))
-        edit = QPushButton("Edit in Annotation")
-        edit.setIcon(icon("edit"))
+        self.accept_button = QPushButton("Accept")
+        self.accept_button.setIcon(icon("accept", active=True))
+        self.accept_button.clicked.connect(self.accept_prediction_requested.emit)
+        self.reject_button = QPushButton("Reject")
+        self.reject_button.setIcon(icon("reject"))
+        self.reject_button.clicked.connect(self.reject_prediction_requested.emit)
+        self.edit_button = QPushButton("Edit in Annotation")
+        self.edit_button.setIcon(icon("edit"))
+        self.edit_button.clicked.connect(self._show_edit_placeholder)
 
-        layout.addWidget(accept)
-        layout.addWidget(reject)
-        layout.addWidget(edit)
+        layout.addWidget(self.accept_button)
+        layout.addWidget(self.reject_button)
+        layout.addWidget(self.edit_button)
+        self.set_predictions([])
         return panel
 
     def set_navigation_state(
@@ -134,25 +150,72 @@ class AssistedReviewPage(QWidget):
     ) -> None:
         self.navigation_bar.set_state(filename, current_index, total_count, can_go_previous, can_go_next)
 
-    def _prediction_row(self, name: str, confidence: str, state: str) -> QWidget:
-        row = QFrame()
-        row.setObjectName("predictionRow")
-        layout = QVBoxLayout(row)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(5)
+    def set_predictions(self, predictions: list[dict[str, object]]) -> None:
+        selected_id = self.selected_prediction_id()
+        self.suggestion_list.blockSignals(True)
+        self.suggestion_list.clear()
+        for index, prediction in enumerate(predictions, start=1):
+            prediction_id = str(prediction.get("id") or f"pred_{index:03d}")
+            label = str(prediction.get("label") or "crack")
+            confidence = prediction.get("confidence")
+            try:
+                confidence_text = f"{float(confidence):.2f}"
+            except (TypeError, ValueError):
+                confidence_text = "--"
+            status = str(prediction.get("status") or "pending")
+            item = QListWidgetItem(f"{prediction_id} | {label} | {confidence_text} | {status}")
+            item.setData(Qt.UserRole, prediction_id)
+            item.setData(Qt.UserRole + 1, status)
+            self.suggestion_list.addItem(item)
+            if prediction_id == selected_id:
+                self.suggestion_list.setCurrentItem(item)
 
-        top = QHBoxLayout()
-        title = QLabel(name)
-        title.setObjectName("predictionTitle")
-        status = QLabel(state)
-        status.setObjectName("statusPill")
-        top.addWidget(title)
-        top.addStretch(1)
-        top.addWidget(status)
+        has_predictions = self.suggestion_list.count() > 0
+        self.suggestion_list.setVisible(has_predictions)
+        self.empty_suggestions_label.setVisible(not has_predictions)
+        self.suggestion_list.blockSignals(False)
+        self._update_action_state()
 
-        confidence_label = QLabel(f"confidence {confidence}")
-        confidence_label.setObjectName("mutedText")
+    def selected_prediction_id(self) -> str:
+        item = self.suggestion_list.currentItem()
+        return str(item.data(Qt.UserRole) or "") if item else ""
 
-        layout.addLayout(top)
-        layout.addWidget(confidence_label)
-        return row
+    def select_prediction(self, prediction_id: str) -> None:
+        self.suggestion_list.blockSignals(True)
+        for row in range(self.suggestion_list.count()):
+            item = self.suggestion_list.item(row)
+            if str(item.data(Qt.UserRole) or "") == prediction_id:
+                self.suggestion_list.setCurrentItem(item)
+                break
+        self.suggestion_list.blockSignals(False)
+        self._update_action_state()
+
+    def _handle_suggestion_selection(
+        self,
+        current: QListWidgetItem | None,
+        previous: QListWidgetItem | None,
+    ) -> None:
+        self._update_action_state()
+        if current:
+            self.prediction_selected.emit(str(current.data(Qt.UserRole) or ""))
+
+    def _handle_overlay_selection_changed(self, annotation: object) -> None:
+        if isinstance(annotation, dict) and annotation.get("item_kind") == "prediction":
+            self.select_prediction(str(annotation.get("id") or ""))
+        else:
+            self._update_action_state()
+
+    def _update_action_state(self) -> None:
+        item = self.suggestion_list.currentItem()
+        has_selection = item is not None
+        is_pending = has_selection and str(item.data(Qt.UserRole + 1) or "pending") == "pending"
+        self.accept_button.setEnabled(is_pending)
+        self.reject_button.setEnabled(is_pending)
+        self.edit_button.setEnabled(has_selection)
+
+    def _show_edit_placeholder(self) -> None:
+        QMessageBox.information(
+            self,
+            "Edit in Annotation",
+            "Edit in Annotation will be added later.",
+        )
