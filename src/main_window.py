@@ -35,6 +35,7 @@ from src.prediction_io import (
     prediction_to_annotation,
     save_predictions,
 )
+from src.yolo_seg_export import DEFAULT_OUTPUT_DIR, export_yolo_seg_dataset
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
@@ -176,6 +177,9 @@ class MainWindow(QMainWindow):
         self.manual_annotation_page.clear_no_defect_requested.connect(self.clear_current_image_no_defect)
         self.manual_annotation_page.annotation_changed.connect(self.mark_current_image_dirty)
         self.dataset_export_page.refresh_requested.connect(self.refresh_dataset_page)
+        self.dataset_export_page.browse_yolo_output_requested.connect(self.browse_yolo_export_output_dir)
+        self.dataset_export_page.export_yolo_requested.connect(self.export_yolo_seg_dataset_from_ui)
+        self.dataset_export_page.set_yolo_output_dir(str(DEFAULT_OUTPUT_DIR))
         self.stack.addWidget(self.assisted_review_page)
         self.stack.addWidget(self.manual_annotation_page)
         self.stack.addWidget(self.dataset_export_page)
@@ -296,6 +300,56 @@ class MainWindow(QMainWindow):
 
     def save_current_annotation_json(self) -> None:
         self.save_current_image_annotations()
+
+    def browse_yolo_export_output_dir(self) -> None:
+        current_output = str(self.dataset_export_page.yolo_export_settings().get("output_dir") or DEFAULT_OUTPUT_DIR)
+        folder_path = QFileDialog.getExistingDirectory(self, "Select YOLO-Seg Export Folder", current_output)
+        if folder_path:
+            self.dataset_export_page.set_yolo_output_dir(folder_path)
+
+    def export_yolo_seg_dataset_from_ui(self, settings: dict[str, object]) -> None:
+        if not self._prepare_for_leaving_current_image():
+            return
+
+        image_folder = self.current_folder_path
+        if not image_folder:
+            image_folder = QFileDialog.getExistingDirectory(self, "Select Source Image Folder")
+            if not image_folder:
+                return
+
+        output_dir = self._resolved_output_dir(str(settings.get("output_dir") or DEFAULT_OUTPUT_DIR))
+        if output_dir.exists() and any(output_dir.iterdir()) and not self._confirm_yolo_export_replace():
+            return
+
+        try:
+            report = export_yolo_seg_dataset(
+                image_folder=image_folder,
+                output_dir=output_dir,
+                train_percent=int(settings.get("train_percent", 70)),
+                val_percent=int(settings.get("val_percent", 20)),
+                test_percent=int(settings.get("test_percent", 10)),
+                seed=int(settings.get("seed", 42)),
+                include_no_defect=bool(settings.get("include_no_defect", True)),
+                include_uncertain=bool(settings.get("include_uncertain", False)),
+            )
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "YOLO Export Failed", str(error))
+            return
+
+        QMessageBox.information(
+            self,
+            "YOLO Export Complete",
+            "\n".join(
+                [
+                    f"Output: {output_dir}",
+                    f"Images exported: {report.get('images_exported', 0)}",
+                    f"Labels written: {report.get('labels_written', 0)}",
+                    f"No Defect negatives: {report.get('no_defect_images_exported', 0)}",
+                    f"Skipped unreviewed: {report.get('skipped_unreviewed', 0)}",
+                ]
+            ),
+        )
+        self.statusBar().showMessage(f"Exported YOLO-Seg dataset to {output_dir}.", 5000)
 
     def run_dummy_detection(self) -> None:
         if not self.current_image_path or not self.current_image_size:
@@ -677,6 +731,23 @@ class MainWindow(QMainWindow):
         dialog.setDefaultButton(cancel_button)
         dialog.exec()
         return dialog.clickedButton() is replace_button
+
+    def _confirm_yolo_export_replace(self) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Question)
+        dialog.setWindowTitle("Existing Export Output")
+        dialog.setText("Existing YOLO export output may be replaced.\nContinue export?")
+        export_button = dialog.addButton("Export", QMessageBox.AcceptRole)
+        cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        return dialog.clickedButton() is export_button
+
+    def _resolved_output_dir(self, output_dir: str) -> Path:
+        path = Path(output_dir).expanduser()
+        if path.is_absolute():
+            return path
+        return Path(__file__).resolve().parent.parent / path
 
     def _show_prediction_folder_import_summary(self, summary: dict[str, int]) -> None:
         QMessageBox.information(

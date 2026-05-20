@@ -7,8 +7,11 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHeaderView,
     QHBoxLayout,
+    QCheckBox,
     QLabel,
+    QLineEdit,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -20,6 +23,8 @@ from src.icons import icon
 
 class DatasetExportPage(QWidget):
     refresh_requested = Signal()
+    browse_yolo_output_requested = Signal()
+    export_yolo_requested = Signal(dict)
 
     def __init__(self) -> None:
         super().__init__()
@@ -168,24 +173,82 @@ class DatasetExportPage(QWidget):
         title.setObjectName("panelTitle")
         layout.addWidget(title)
 
-        buttons = [
-            ("Export YOLO Segmentation", "export"),
-            ("Export COCO", "export"),
-            ("Export JSON Backup", "save"),
-            ("Generate Report", "report"),
-        ]
-        for text, icon_name in buttons:
-            button = QPushButton(text)
-            button.setObjectName("disabledExportButton")
-            button.setIcon(icon(icon_name))
-            button.setEnabled(False)
-            layout.addWidget(button)
+        output_label = QLabel("Output Folder")
+        output_label.setObjectName("fieldLabel")
+        self.yolo_output_field = QLineEdit("data/exports/yolo_seg")
+        self.yolo_output_field.setObjectName("propertyField")
+        browse_button = QPushButton("Browse")
+        browse_button.setIcon(icon("open_folder"))
+        browse_button.clicked.connect(self.browse_yolo_output_requested.emit)
+        output_row = QHBoxLayout()
+        output_row.setSpacing(8)
+        output_row.addWidget(self.yolo_output_field, 1)
+        output_row.addWidget(browse_button)
+        layout.addWidget(output_label)
+        layout.addLayout(output_row)
 
-        layout.addStretch(1)
+        split_grid = QGridLayout()
+        split_grid.setHorizontalSpacing(8)
+        split_grid.setVerticalSpacing(8)
+        self.train_spin = self._percent_spinbox(70)
+        self.val_spin = self._percent_spinbox(20)
+        self.test_spin = self._percent_spinbox(10)
+        self.seed_spin = QSpinBox()
+        self.seed_spin.setRange(0, 999999)
+        self.seed_spin.setValue(42)
+        self.seed_spin.setObjectName("propertyField")
+        for column, (label_text, widget) in enumerate(
+            [
+                ("Train %", self.train_spin),
+                ("Val %", self.val_spin),
+                ("Test %", self.test_spin),
+                ("Seed", self.seed_spin),
+            ]
+        ):
+            label = QLabel(label_text)
+            label.setObjectName("fieldLabel")
+            split_grid.addWidget(label, 0, column)
+            split_grid.addWidget(widget, 1, column)
+        layout.addLayout(split_grid)
 
-        note = QLabel("Export tools are intentionally disabled in Milestone 1.")
+        self.include_no_defect_checkbox = QCheckBox("Include No Defect images")
+        self.include_no_defect_checkbox.setChecked(True)
+        self.include_uncertain_checkbox = QCheckBox("Include uncertain class")
+        self.include_uncertain_checkbox.setChecked(False)
+        layout.addWidget(self.include_no_defect_checkbox)
+        layout.addWidget(self.include_uncertain_checkbox)
+
+        self.export_yolo_button = QPushButton("Export YOLO-Seg Dataset")
+        self.export_yolo_button.setIcon(icon("export", active=True))
+        self.export_yolo_button.setProperty("emphasized", True)
+        self.export_yolo_button.clicked.connect(lambda: self.export_yolo_requested.emit(self.yolo_export_settings()))
+        layout.addWidget(self.export_yolo_button)
+
+        note = QLabel("Exports confirmed annotations only. Predictions are ignored unless accepted and saved.")
         note.setObjectName("placeholderNote")
         note.setAlignment(Qt.AlignLeft)
         note.setWordWrap(True)
         layout.addWidget(note)
+        layout.addStretch(1)
         return panel
+
+    def set_yolo_output_dir(self, output_dir: str) -> None:
+        self.yolo_output_field.setText(output_dir)
+
+    def yolo_export_settings(self) -> dict[str, object]:
+        return {
+            "output_dir": self.yolo_output_field.text().strip(),
+            "train_percent": self.train_spin.value(),
+            "val_percent": self.val_spin.value(),
+            "test_percent": self.test_spin.value(),
+            "seed": self.seed_spin.value(),
+            "include_no_defect": self.include_no_defect_checkbox.isChecked(),
+            "include_uncertain": self.include_uncertain_checkbox.isChecked(),
+        }
+
+    def _percent_spinbox(self, value: int) -> QSpinBox:
+        spinbox = QSpinBox()
+        spinbox.setRange(0, 100)
+        spinbox.setValue(value)
+        spinbox.setObjectName("propertyField")
+        return spinbox

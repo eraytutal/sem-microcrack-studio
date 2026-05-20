@@ -302,6 +302,7 @@ QLabel#summaryLabel {
 
 QComboBox,
 QDoubleSpinBox,
+QSpinBox,
 QTextEdit,
 QLineEdit,
 QListWidget {
@@ -386,6 +387,7 @@ QHeaderView::section {
 
 QComboBox#propertyField,
 QDoubleSpinBox#propertyField,
+QSpinBox#propertyField,
 QLineEdit#propertyField {
     background: #0f1a25;
     border: 1px solid #3a5870;
@@ -397,6 +399,7 @@ QLineEdit#propertyField {
 
 QComboBox#propertyField:hover,
 QDoubleSpinBox#propertyField:hover,
+QSpinBox#propertyField:hover,
 QLineEdit#propertyField:hover {
     border-color: #4a7895;
     border-left-color: #67e8f9;
