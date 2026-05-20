@@ -27,6 +27,27 @@ python app.py
 
 Expected result: the SEM Microcrack Studio main window opens on Assisted Review.
 
+## Windows Launcher Test
+
+1. Start from a fresh clone.
+2. Double-click `setup_windows.bat`.
+3. Confirm `.venv` is created.
+4. Confirm dependencies install without errors.
+5. Confirm these folders are created:
+
+```text
+data/
+data/annotations/
+data/predictions/
+data/exports/
+logs/
+```
+
+6. Double-click `run_app.bat`.
+7. Confirm the app opens.
+8. Confirm no Traceback appears.
+9. If the app does not open, run `run_app_debug.bat` or check `logs/app_run.log`.
+
 ## Demo Data
 
 Prepare local demo folders. Do not add large SEM datasets to the repository.

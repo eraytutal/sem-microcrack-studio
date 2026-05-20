@@ -5,6 +5,8 @@ __pycache__/
 *.pyd
 .env
 .DS_Store
+logs/
+*.log
 data/annotations/*.json
 data/predictions/*.json
 data/exports/

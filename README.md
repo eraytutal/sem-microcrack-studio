@@ -25,6 +25,32 @@ pip install -r requirements.txt
 python app.py
 ```
 
+## Windows One-Click Demo Startup
+
+Python must still be installed on the Windows computer.
+
+First-time setup:
+
+```text
+setup_windows.bat
+```
+
+The setup script creates `.venv`, installs `requirements.txt`, and creates the local `data/` and `logs/` folders.
+
+Daily startup:
+
+```text
+run_app.bat
+```
+
+Debug startup:
+
+```text
+run_app_debug.bat
+```
+
+Generated annotation, prediction, export, and log files remain local and are ignored by Git.
+
 ## Quick Start
 
 1. Open Assisted Review.
