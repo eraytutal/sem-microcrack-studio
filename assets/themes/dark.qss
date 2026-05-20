@@ -9,6 +9,19 @@ QWidget#workspace {
     background: #0b1016;
 }
 
+QMessageBox {
+    background: #111923;
+    color: #dbe7f3;
+}
+
+QMessageBox QLabel {
+    color: #dbe7f3;
+}
+
+QMessageBox QPushButton {
+    min-width: 84px;
+}
+
 QFrame#sidebar {
     background: #0f1720;
     border-right: 1px solid #203040;

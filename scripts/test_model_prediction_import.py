@@ -18,8 +18,10 @@ from src import annotation_io, prediction_io  # noqa: E402
 from src.model_prediction_import import (  # noqa: E402
     DEFAULT_CLASS_MAP,
     import_prediction_folder,
+    import_prediction_folder_for_images,
     import_prediction_txt,
     parse_yolo_seg_line,
+    summarize_import_results,
 )
 from src.prediction_io import generate_dummy_polygon_predictions, load_predictions, save_predictions  # noqa: E402
 
@@ -231,12 +233,34 @@ def test_7_empty_file_outputs_valid_json() -> None:
 
     check_equal(result["predictions"], [], "empty file result predictions")
     check_equal(payload["predictions"], [], "empty file JSON predictions")
+    check_equal(result["summary"]["empty_label_files"], 1, "empty file summary count")
+    check_equal(result["summary"]["imported_predictions"], 0, "empty file imported count")
     check_equal(payload["image"]["filename"], "empty.png", "image filename")
     check_equal(payload["image"]["width"], 1000, "image width")
     check_equal(payload["image"]["height"], 500, "image height")
 
 
-def test_8_multiple_lines_skip_invalid_and_assign_deterministic_ids() -> None:
+def test_8_whitespace_only_file_outputs_valid_json() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        image_path = root / "whitespace.png"
+        label_path = root / "whitespace.txt"
+        output_dir = root / "predictions"
+        make_image(image_path)
+        label_path.write_text("   \n\t\n", encoding="utf-8")
+
+        with real_data_guard():
+            result = import_prediction_txt(image_path, label_path, CLASS_MAP, output_dir)
+
+        payload = read_json(output_dir / "whitespace.json")
+
+    check_equal(result["predictions"], [], "whitespace file result predictions")
+    check_equal(payload["predictions"], [], "whitespace file JSON predictions")
+    check_equal(result["summary"]["empty_label_files"], 1, "whitespace file summary count")
+    check_equal(result["warnings"], [], "whitespace-only file should not warn")
+
+
+def test_9_multiple_lines_skip_invalid_and_assign_deterministic_ids() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         image_path = root / "multi.png"
@@ -263,9 +287,11 @@ def test_8_multiple_lines_skip_invalid_and_assign_deterministic_ids() -> None:
     check_equal(predictions[0]["label"], "crack", "first label")
     check_equal(predictions[1]["label"], "unknown", "unknown label")
     check(result["warnings"], "invalid line should produce warning")
+    check_equal(result["summary"]["invalid_lines_skipped"], 1, "invalid line count")
+    check_equal(result["summary"]["imported_predictions"], 2, "mixed import count")
 
 
-def test_9_bbox_only_yolo_line_is_not_polygon() -> None:
+def test_10_bbox_only_yolo_line_is_not_polygon() -> None:
     line = "0 0.5 0.5 0.2 0.1 0.91"
     check_equal(
         parse_yolo_seg_line(line, 1000, 500, CLASS_MAP),
@@ -286,9 +312,10 @@ def test_9_bbox_only_yolo_line_is_not_polygon() -> None:
 
     check_equal(result["predictions"], [], "bbox-only import should produce no predictions")
     check(result["warnings"], "bbox-only import should produce warning")
+    check_equal(result["summary"]["invalid_lines_skipped"], 1, "bbox-only skipped count")
 
 
-def test_10_import_single_txt_writes_predictions_only() -> None:
+def test_11_import_single_txt_writes_predictions_only() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         image_path = root / "test_image.png"
@@ -316,10 +343,12 @@ def test_10_import_single_txt_writes_predictions_only() -> None:
     check_equal(len(payload["predictions"]), 1, "single import prediction count")
     check_equal(payload["predictions"][0]["id"], "pred_001", "single import prediction id")
     check_equal(payload["predictions"][0]["shape_type"], "polygon", "single import shape")
+    check_equal(result["summary"]["prediction_files_found"], 1, "single import file found")
+    check_equal(result["summary"]["imported_predictions"], 1, "single import summary count")
     check_equal(annotations_dir_exists, False, "single import should not create annotations dir")
 
 
-def test_11_import_folder_writes_each_prediction_json() -> None:
+def test_12_import_folder_handles_missing_labels_and_summarizes() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         image_dir = root / "images"
@@ -327,13 +356,18 @@ def test_11_import_folder_writes_each_prediction_json() -> None:
         output_dir = root / "predictions"
         make_image(image_dir / "a.png", 1000, 500)
         make_image(image_dir / "b.png", 1000, 500)
+        make_image(image_dir / "c.png", 1000, 500)
         label_dir.mkdir(parents=True, exist_ok=True)
         (label_dir / "a.txt").write_text(
             "0 0.10 0.20 0.30 0.20 0.30 0.40 0.10 0.40",
             encoding="utf-8",
         )
         (label_dir / "b.txt").write_text(
-            "1 0.50 0.50 0.60 0.50 0.60 0.60 0.50 0.60",
+            "",
+            encoding="utf-8",
+        )
+        (label_dir / "extra.txt").write_text(
+            "0 0.10 0.10 0.20 0.10 0.20 0.20",
             encoding="utf-8",
         )
 
@@ -342,17 +376,90 @@ def test_11_import_folder_writes_each_prediction_json() -> None:
 
         payload_a = read_json(output_dir / "a.json")
         payload_b = read_json(output_dir / "b.json")
+        payload_c = read_json(output_dir / "c.json")
+        summary = summarize_import_results(results)
         output_a_exists = (output_dir / "a.json").exists()
         output_b_exists = (output_dir / "b.json").exists()
+        output_c_exists = (output_dir / "c.json").exists()
 
-    check_equal(len(results), 2, "folder import result count")
+    check_equal(len(results), 3, "folder import result count")
     check_equal(output_a_exists, True, "a prediction JSON exists")
     check_equal(output_b_exists, True, "b prediction JSON exists")
+    check_equal(output_c_exists, True, "c prediction JSON exists")
     check_equal(payload_a["predictions"][0]["label"], "crack", "a prediction label")
-    check_equal(payload_b["predictions"][0]["label"], "scratch", "b prediction label")
+    check_equal(payload_b["predictions"], [], "empty b label predictions")
+    check_equal(payload_c["predictions"], [], "missing c label predictions")
+    check_equal(summary["images_processed"], 3, "folder summary images")
+    check_equal(summary["prediction_files_found"], 2, "folder summary found labels")
+    check_equal(summary["imported_predictions"], 1, "folder summary imported predictions")
+    check_equal(summary["empty_label_files"], 1, "folder summary empty labels")
+    check_equal(summary["missing_label_files"], 1, "folder summary missing labels")
+    check_equal(summary["unmatched_label_files"], 1, "folder summary unmatched labels")
+    check_equal((output_dir / "extra.json").exists(), False, "unmatched label should not create JSON")
 
 
-def test_12_annotation_safety_and_dummy_workflow() -> None:
+def test_13_folder_for_images_uses_loaded_images_only() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        image_dir = root / "images"
+        label_dir = root / "labels"
+        output_dir = root / "predictions"
+        image_a = image_dir / "a.png"
+        image_b = image_dir / "b.png"
+        image_c = image_dir / "c.png"
+        make_image(image_a, 1000, 500)
+        make_image(image_b, 1000, 500)
+        make_image(image_c, 1000, 500)
+        label_dir.mkdir(parents=True, exist_ok=True)
+        (label_dir / "a.txt").write_text(
+            "0 0.10 0.20 0.30 0.20 0.30 0.40 0.10 0.40",
+            encoding="utf-8",
+        )
+        (label_dir / "c.txt").write_text(
+            "1 0.50 0.50 0.60 0.50 0.60 0.60 0.50 0.60",
+            encoding="utf-8",
+        )
+
+        with real_data_guard():
+            results = import_prediction_folder_for_images([image_a, image_b], label_dir, CLASS_MAP, output_dir)
+
+        payload_a = read_json(output_dir / "a.json")
+        payload_b = read_json(output_dir / "b.json")
+        summary = summarize_import_results(results)
+
+    check_equal(len(results), 2, "loaded-image-only result count")
+    check_equal(len(payload_a["predictions"]), 1, "loaded image a predictions")
+    check_equal(payload_b["predictions"], [], "loaded image b missing label predictions")
+    check_equal((output_dir / "c.json").exists(), False, "unloaded image c should not be imported")
+    check_equal(summary["images_processed"], 2, "loaded-image-only images processed")
+    check_equal(summary["prediction_files_found"], 1, "loaded-image-only matching labels")
+    check_equal(summary["missing_label_files"], 1, "loaded-image-only missing labels")
+    check_equal(summary["unmatched_label_files"], 1, "loaded-image-only unmatched label count")
+
+
+def test_14_unicode_filename_import() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        image_path = root / "断裂.png"
+        label_path = root / "断裂.txt"
+        output_dir = root / "predictions"
+        make_image(image_path, 1000, 500)
+        label_path.write_text(
+            "0 0.10 0.20 0.30 0.20 0.30 0.40 0.10 0.40 0.87",
+            encoding="utf-8",
+        )
+
+        with real_data_guard():
+            result = import_prediction_txt(image_path, label_path, CLASS_MAP, output_dir)
+
+        payload = read_json(output_dir / "断裂.json")
+
+    check_equal(Path(result["output_path"]).name, "断裂.json", "unicode output filename")
+    check_equal(payload["image"]["filename"], "断裂.png", "unicode image filename")
+    check_equal(payload["predictions"][0]["label"], "crack", "unicode prediction label")
+
+
+def test_15_annotation_safety_and_dummy_workflow() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         image_path = root / "dummy.png"
@@ -394,11 +501,14 @@ def main() -> int:
         ("5 UTF-8 BOM temp label file", test_5_utf8_bom_temp_label_file),
         ("6 invalid short polygon", test_6_invalid_short_polygon),
         ("7 empty file output JSON", test_7_empty_file_outputs_valid_json),
-        ("8 multiple lines deterministic ids", test_8_multiple_lines_skip_invalid_and_assign_deterministic_ids),
-        ("9 bbox-only YOLO line skipped", test_9_bbox_only_yolo_line_is_not_polygon),
-        ("10 import single txt", test_10_import_single_txt_writes_predictions_only),
-        ("11 import folder", test_11_import_folder_writes_each_prediction_json),
-        ("12 annotation safety and dummy workflow", test_12_annotation_safety_and_dummy_workflow),
+        ("8 whitespace-only file output JSON", test_8_whitespace_only_file_outputs_valid_json),
+        ("9 multiple lines deterministic ids", test_9_multiple_lines_skip_invalid_and_assign_deterministic_ids),
+        ("10 bbox-only YOLO line skipped", test_10_bbox_only_yolo_line_is_not_polygon),
+        ("11 import single txt", test_11_import_single_txt_writes_predictions_only),
+        ("12 import folder missing labels", test_12_import_folder_handles_missing_labels_and_summarizes),
+        ("13 folder import uses loaded images only", test_13_folder_for_images_uses_loaded_images_only),
+        ("14 unicode filename import", test_14_unicode_filename_import),
+        ("15 annotation safety and dummy workflow", test_15_annotation_safety_and_dummy_workflow),
     ]
     passed = [run_test(name, test_func) for name, test_func in tests]
     if all(passed):

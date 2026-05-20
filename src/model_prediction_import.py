@@ -81,15 +81,30 @@ def import_prediction_txt(
     image_size = _read_image_size(image)
     warnings: list[str] = []
     predictions: list[dict[str, Any]] = []
+    summary = {
+        "images_processed": 1,
+        "prediction_files_found": 0,
+        "imported_predictions": 0,
+        "empty_label_files": 0,
+        "missing_label_files": 0,
+        "unmatched_label_files": 0,
+        "invalid_lines_skipped": 0,
+    }
 
     if not label_file.exists():
+        summary["missing_label_files"] = 1
         warnings.append(f"Label file does not exist: {label_file}")
     else:
+        summary["prediction_files_found"] = 1
         try:
             lines = label_file.read_text(encoding="utf-8").splitlines()
         except OSError as error:
             lines = []
             warnings.append(f"Could not read label file: {error}")
+
+        non_empty_lines = [line for line in lines if line.strip()]
+        if not non_empty_lines:
+            summary["empty_label_files"] = 1
 
         for line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
@@ -98,12 +113,14 @@ def import_prediction_txt(
 
             prediction = parse_yolo_seg_line(stripped, image_size.width(), image_size.height(), class_map)
             if prediction is None:
+                summary["invalid_lines_skipped"] += 1
                 warnings.append(f"Skipped invalid or unsupported line {line_number}: {stripped}")
                 continue
 
             prediction["id"] = f"pred_{len(predictions) + 1:03d}"
             predictions.append(prediction)
 
+    summary["imported_predictions"] = len(predictions)
     payload = {
         "image": {
             "filename": image.name,
@@ -122,6 +139,7 @@ def import_prediction_txt(
         **payload,
         "output_path": str(output_path),
         "warnings": warnings,
+        "summary": summary,
     }
 
 
@@ -132,15 +150,61 @@ def import_prediction_folder(
     output_dir: str | Path = PREDICTIONS_DIR,
 ) -> list[dict[str, Any]]:
     image_root = Path(image_dir)
-    label_root = Path(label_dir)
-    results: list[dict[str, Any]] = []
-    for image_path in sorted(image_root.iterdir(), key=lambda path: path.name.lower()):
-        if not image_path.is_file() or image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
-            continue
+    image_paths = [
+        image_path
+        for image_path in sorted(image_root.iterdir(), key=lambda path: path.name.lower())
+        if image_path.is_file() and image_path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+    ]
+    return import_prediction_folder_for_images(image_paths, label_dir, class_map, output_dir)
 
-        label_path = label_root / f"{image_path.stem}.txt"
-        results.append(import_prediction_txt(image_path, label_path, class_map, output_dir))
+
+def import_prediction_folder_for_images(
+    image_paths: list[str | Path],
+    label_dir: str | Path,
+    class_map: dict,
+    output_dir: str | Path = PREDICTIONS_DIR,
+) -> list[dict[str, Any]]:
+    label_root = Path(label_dir)
+    image_path_objects = [Path(image_path) for image_path in image_paths]
+    image_stems = {image_path.stem for image_path in image_path_objects}
+    label_paths = {
+        label_path.stem: label_path
+        for label_path in label_root.iterdir()
+        if label_path.is_file() and label_path.suffix.lower() == ".txt"
+    }
+    unmatched_label_count = sum(1 for label_stem in label_paths if label_stem not in image_stems)
+
+    results: list[dict[str, Any]] = []
+    for image_path in image_path_objects:
+        label_path = label_paths.get(image_path.stem, label_root / f"{image_path.stem}.txt")
+        result = import_prediction_txt(image_path, label_path, class_map, output_dir)
+        results.append(result)
+
+    if results:
+        results[0].setdefault("summary", {})["unmatched_label_files"] = unmatched_label_count
     return results
+
+
+def summarize_import_results(results: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {
+        "images_processed": 0,
+        "prediction_files_found": 0,
+        "imported_predictions": 0,
+        "empty_label_files": 0,
+        "missing_label_files": 0,
+        "unmatched_label_files": 0,
+        "invalid_lines_skipped": 0,
+    }
+    for result in results:
+        result_summary = result.get("summary", {})
+        if not isinstance(result_summary, dict):
+            continue
+        for key in summary:
+            try:
+                summary[key] += int(result_summary.get(key, 0))
+            except (TypeError, ValueError):
+                continue
+    return summary
 
 
 def _read_image_size(image_path: Path) -> QSize:

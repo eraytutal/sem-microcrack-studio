@@ -24,6 +24,7 @@ class AssistedReviewPage(QWidget):
     previous_image_requested = Signal()
     next_image_requested = Signal()
     run_detection_requested = Signal()
+    import_predictions_requested = Signal()
     save_review_requested = Signal()
     cancel_review_changes_requested = Signal()
     accept_prediction_requested = Signal()
@@ -53,19 +54,22 @@ class AssistedReviewPage(QWidget):
         layout.setSpacing(8)
 
         actions = [
-            ("Open Image", "open_image"),
             ("Open Folder", "open_folder"),
-            ("Run Detection", "detect"),
+            ("Run Dummy Detection", "detect"),
+            ("Import Prediction Folder", "open_folder"),
         ]
         for text, icon_name in actions:
             button = QPushButton(text)
             button.setIcon(icon(icon_name))
-            if text == "Open Image":
-                button.clicked.connect(self.open_image_requested.emit)
-            elif text == "Open Folder":
+            if text == "Open Folder":
                 button.clicked.connect(self.open_folder_requested.emit)
-            elif text == "Run Detection":
+            elif text == "Run Dummy Detection":
+                button.setToolTip(
+                    "Generates demo predictions. Use Import Prediction Folder to load real model outputs."
+                )
                 button.clicked.connect(self.run_detection_requested.emit)
+            elif text == "Import Prediction Folder":
+                button.clicked.connect(self.import_predictions_requested.emit)
             layout.addWidget(button)
 
         layout.addStretch(1)

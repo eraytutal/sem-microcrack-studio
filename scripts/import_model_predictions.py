@@ -14,6 +14,7 @@ from src.model_prediction_import import (  # noqa: E402
     DEFAULT_CLASS_MAP,
     import_prediction_folder,
     import_prediction_txt,
+    summarize_import_results,
 )
 
 
@@ -63,7 +64,7 @@ def main() -> int:
             )
             for result in results:
                 _print_result(result)
-            print(f"Imported prediction files: {len(results)}")
+            _print_summary(summarize_import_results(results))
             return 0
     except Exception as error:
         print(f"Import failed: {error}", file=sys.stderr)
@@ -79,6 +80,16 @@ def _print_result(result: dict) -> None:
     print(f"{image.get('filename', 'image')}: imported {len(predictions)} predictions -> {result.get('output_path')}")
     for warning in result.get("warnings", []):
         print(f"  warning: {warning}")
+
+
+def _print_summary(summary: dict) -> None:
+    print(f"Images processed: {summary.get('images_processed', 0)}")
+    print(f"Prediction files found: {summary.get('prediction_files_found', 0)}")
+    print(f"Imported predictions: {summary.get('imported_predictions', 0)}")
+    print(f"Empty label files: {summary.get('empty_label_files', 0)}")
+    print(f"Missing label files: {summary.get('missing_label_files', 0)}")
+    print(f"Unmatched label files ignored: {summary.get('unmatched_label_files', 0)}")
+    print(f"Invalid lines skipped: {summary.get('invalid_lines_skipped', 0)}")
 
 
 if __name__ == "__main__":

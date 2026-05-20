@@ -20,12 +20,18 @@ from PySide6.QtWidgets import (
 from src.annotation_io import get_dataset_status, load_annotation_json, save_annotation_json
 from src.annotation_model import is_polygon_annotation, is_rectangle_annotation, normalize_annotation
 from src.icons import icon
+from src.model_prediction_import import (
+    DEFAULT_CLASS_MAP,
+    import_prediction_folder_for_images,
+    summarize_import_results,
+)
 from src.pages.assisted_review_page import AssistedReviewPage
 from src.pages.dataset_export_page import DatasetExportPage
 from src.pages.manual_annotation_page import ManualAnnotationPage
 from src.prediction_io import (
     generate_dummy_polygon_predictions,
     load_predictions,
+    prediction_path_for_image,
     prediction_to_annotation,
     save_predictions,
 )
@@ -157,6 +163,7 @@ class MainWindow(QMainWindow):
         self.assisted_review_page.previous_image_requested.connect(self.load_previous_image)
         self.assisted_review_page.next_image_requested.connect(self.load_next_image)
         self.assisted_review_page.run_detection_requested.connect(self.run_dummy_detection)
+        self.assisted_review_page.import_predictions_requested.connect(self.import_prediction_folder_for_current_images)
         self.assisted_review_page.save_review_requested.connect(self.save_current_review)
         self.assisted_review_page.cancel_review_changes_requested.connect(self.cancel_current_review_changes)
         self.assisted_review_page.accept_prediction_requested.connect(self.accept_selected_prediction)
@@ -292,7 +299,7 @@ class MainWindow(QMainWindow):
 
     def run_dummy_detection(self) -> None:
         if not self.current_image_path or not self.current_image_size:
-            QMessageBox.warning(self, "No Image Loaded", "Open an image before running detection.")
+            QMessageBox.warning(self, "No Image Loaded", "Open an image folder before running dummy detection.")
             return
         if self.has_unsaved_review_changes():
             self._handle_unsaved_review_changes_before_leaving(
@@ -308,6 +315,63 @@ class MainWindow(QMainWindow):
         self._update_review_save_state()
         filename = Path(self.current_image_path).name
         self.statusBar().showMessage(f"Generated dummy predictions for {filename}.", 4000)
+
+    def import_prediction_folder_for_current_images(self) -> None:
+        if not self.current_folder_path or not self.image_paths or not self.current_image_path:
+            QMessageBox.warning(
+                self,
+                "No Image Folder Loaded",
+                "Please open an image folder before importing predictions.",
+            )
+            return
+
+        if self.has_unsaved_review_changes():
+            self._handle_unsaved_review_changes_before_leaving(
+                "You have unsaved prediction review changes.\nSave or cancel these changes before importing predictions?"
+            )
+            return
+
+        existing_prediction_files = [
+            prediction_path_for_image(image_path)
+            for image_path in self.image_paths
+            if prediction_path_for_image(image_path).exists()
+        ]
+        if existing_prediction_files and not self._confirm_prediction_folder_import_replace():
+            return
+
+        label_folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "Import Prediction Label Folder",
+        )
+        if not label_folder_path:
+            return
+
+        try:
+            import_results = import_prediction_folder_for_images(
+                self.image_paths,
+                label_folder_path,
+                DEFAULT_CLASS_MAP,
+            )
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "Prediction Import Failed", str(error))
+            return
+
+        for image_path in self.image_paths:
+            self.review_dirty_by_image[image_path] = False
+            self.predictions_by_image[image_path] = load_predictions(image_path)
+
+        predictions = load_predictions(self.current_image_path)
+        self.predictions_by_image[self.current_image_path] = predictions
+        self._display_predictions(predictions)
+        self.assisted_review_page.image_viewer.clear_selection()
+        self._update_review_save_state()
+
+        summary = summarize_import_results(import_results)
+        self._show_prediction_folder_import_summary(summary)
+        self.statusBar().showMessage(
+            f"Imported {summary['imported_predictions']} predictions from label folder.",
+            5000,
+        )
 
     def accept_selected_prediction(self) -> None:
         prediction = self._selected_prediction()
@@ -603,6 +667,34 @@ class MainWindow(QMainWindow):
             return "cancel_changes"
         return "cancel_changes"
 
+    def _confirm_prediction_folder_import_replace(self) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Question)
+        dialog.setWindowTitle("Existing Predictions")
+        dialog.setText("Existing prediction files may be replaced.\nReplace predictions for matched images?")
+        replace_button = dialog.addButton("Replace", QMessageBox.AcceptRole)
+        cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        return dialog.clickedButton() is replace_button
+
+    def _show_prediction_folder_import_summary(self, summary: dict[str, int]) -> None:
+        QMessageBox.information(
+            self,
+            "Prediction Import Summary",
+            "\n".join(
+                [
+                    f"Images in current folder: {summary.get('images_processed', 0)}",
+                    f"Matching label files found: {summary.get('prediction_files_found', 0)}",
+                    f"Missing label files: {summary.get('missing_label_files', 0)}",
+                    f"Empty label files: {summary.get('empty_label_files', 0)}",
+                    f"Unmatched label files ignored: {summary.get('unmatched_label_files', 0)}",
+                    f"Imported predictions: {summary.get('imported_predictions', 0)}",
+                    f"Invalid/unsupported lines skipped: {summary.get('invalid_lines_skipped', 0)}",
+                ]
+            ),
+        )
+
     def _handle_unsaved_review_changes_before_leaving(self, message: str) -> None:
         choice = self._ask_save_or_cancel_changes("Unsaved Review Changes", message)
         if choice == "save":
@@ -701,12 +793,16 @@ class MainWindow(QMainWindow):
             self.assisted_review_page.image_viewer.select_annotation_by_data_id(selected_id)
 
     def _update_review_save_state(self) -> None:
-        if not self.current_image_path or not self.predictions_by_image.get(self.current_image_path):
+        if not self.current_image_path:
             self.assisted_review_page.set_review_save_state("none")
         elif self.review_dirty_by_image.get(self.current_image_path, False):
             self.assisted_review_page.set_review_save_state("unsaved")
-        else:
+        elif self.predictions_by_image.get(self.current_image_path) or prediction_path_for_image(
+            self.current_image_path
+        ).exists():
             self.assisted_review_page.set_review_save_state("saved")
+        else:
+            self.assisted_review_page.set_review_save_state("none")
 
     def _append_accepted_predictions_to_annotations(self, predictions: list[dict[str, object]]) -> None:
         if not self.current_image_path or not self.current_image_size:
