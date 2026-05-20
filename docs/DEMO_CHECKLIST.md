@@ -43,10 +43,11 @@ data/exports/
 logs/
 ```
 
-6. Double-click `run_app.bat`.
-7. Confirm the app opens.
+6. Double-click `run_app_hidden.vbs`.
+7. Confirm the app opens without a visible cmd window.
 8. Confirm no Traceback appears.
-9. If the app does not open, run `run_app_debug.bat` or check `logs/app_run.log`.
+9. Double-click `run_app.bat` if a visible-console launcher needs to be checked.
+10. If the app does not open, run `run_app_debug.bat` or check `logs/app_run.log`.
 
 ## Demo Data
 

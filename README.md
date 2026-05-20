@@ -37,13 +37,19 @@ setup_windows.bat
 
 The setup script creates `.venv`, installs `requirements.txt`, and creates the local `data/` and `logs/` folders.
 
-Daily startup:
+Normal no-console startup:
+
+```text
+run_app_hidden.vbs
+```
+
+Visible-console startup:
 
 ```text
 run_app.bat
 ```
 
-Debug startup:
+Debug startup with console:
 
 ```text
 run_app_debug.bat
