@@ -130,6 +130,10 @@ demo_data/images/11.tif
 demo_data/labels/11.txt
 ```
 
+## Demo Data Package
+
+Demo data is not stored in the repository. If available, download `demo_data_v0.1-demo.zip` from the GitHub Release assets. See `docs/DEMO_DATA_PACKAGE.md` for packaging instructions and the expected `images/` and `prediction_labels/` folder layout.
+
 ## Useful Commands
 
 ```powershell

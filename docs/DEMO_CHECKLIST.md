@@ -52,6 +52,8 @@ logs/
 
 Prepare local demo folders. Do not add large SEM datasets to the repository.
 
+For demo data package preparation, see `docs/DEMO_DATA_PACKAGE.md`.
+
 ```text
 demo_data/images/
 demo_data/labels/

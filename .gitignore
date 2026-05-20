@@ -7,6 +7,9 @@ __pycache__/
 .DS_Store
 logs/
 *.log
+demo_data/
+demo_data_*/
+*.zip
 data/annotations/*.json
 data/predictions/*.json
 data/exports/
